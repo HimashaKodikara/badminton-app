@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Badminton Analysis</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: system-ui, sans-serif;
+    background: #0d0d0d;
+    color: #e8e8e8;
+    min-height: 100vh;
+    padding: 0 0 60px;
+  }
+
+  .topbar {
+    background: #111;
+    border-bottom: 1px solid #222;
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .topbar-icon { font-size: 26px; color: #00e5ff; }
+  .topbar h1 { font-size: 18px; font-weight: 600; color: #fff; letter-spacing: 0.3px; }
+  .topbar span { font-size: 13px; color: #666; margin-left: 4px; }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+
+  /* Upload section */
+  .upload-section {
+    padding: 40px 0 32px;
+  }
+  .upload-card {
+    background: #161616;
+    border: 1.5px dashed #2a2a2a;
+    border-radius: 14px;
+    padding: 48px 32px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  .upload-card:hover { border-color: #00e5ff44; }
+  .upload-card.dragover { border-color: #00e5ff; background: #001a1f; }
+  .upload-icon { font-size: 48px; color: #333; margin-bottom: 12px; }
+  .upload-card p { color: #555; font-size: 14px; margin-top: 8px; }
+  .upload-card strong { color: #888; font-size: 16px; }
+  input[type=file] { display: none; }
+
+  .btn-analyze {
+    display: block;
+    margin: 20px auto 0;
+    background: #00e5ff;
+    color: #000;
+    border: none;
+    padding: 13px 40px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+  }
+  .btn-analyze:disabled { background: #1e1e1e; color: #444; cursor: not-allowed; }
+  .btn-analyze:not(:disabled):hover { opacity: 0.85; }
+  .btn-analyze:not(:disabled):active { transform: scale(0.98); }
+
+  #filename-label {
+    text-align: center;
+    font-size: 13px;
+    color: #555;
+    margin-top: 10px;
+  }
+
+  /* Progress */
+  .progress-wrap {
+    background: #161616;
+    border: 1px solid #222;
+    border-radius: 12px;
+    padding: 28px 32px;
+    margin: 0 0 32px;
+    display: none;
+  }
+  .progress-wrap.active { display: block; }
+  .progress-label { font-size: 13px; color: #666; margin-bottom: 10px; }
+  .progress-bar-track { height: 3px; background: #222; border-radius: 99px; overflow: hidden; }
+  .progress-bar-fill { height: 100%; background: #00e5ff; border-radius: 99px; animation: progress-pulse 1.5s ease-in-out infinite; width: 100%; }
+  @keyframes progress-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .progress-status { margin-top: 12px; font-size: 14px; color: #aaa; }
+
+  /* Dashboard */
+  #dashboard { display: none; }
+  #dashboard.visible { display: block; }
+
+  .section-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: #444;
+    margin: 36px 0 14px;
+  }
+
+  /* Metric cards */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+  }
+  .metric-card {
+    background: #161616;
+    border: 1px solid #222;
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .metric-card .val {
+    font-size: 28px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1;
+  }
+  .metric-card .val.cyan { color: #00e5ff; }
+  .metric-card .val.orange { color: #ff6b35; }
+  .metric-card .val.green { color: #4caf7d; }
+  .metric-card .val.purple { color: #a78bfa; }
+  .metric-card .lbl {
+    font-size: 12px;
+    color: #555;
+    margin-top: 6px;
+  }
+  .metric-card .sub {
+    font-size: 11px;
+    color: #333;
+    margin-top: 3px;
+  }
+
+  /* Charts row */
+  .charts-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  @media (max-width: 650px) { .charts-row { grid-template-columns: 1fr; } }
+
+  .chart-card {
+    background: #161616;
+    border: 1px solid #222;
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .chart-card h3 {
+    font-size: 13px;
+    font-weight: 500;
+    color: #888;
+    margin-bottom: 14px;
+  }
+
+  /* Shot table */
+  .table-card {
+    background: #161616;
+    border: 1px solid #222;
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .table-card h3 {
+    font-size: 13px;
+    font-weight: 500;
+    color: #888;
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid #1e1e1e;
+  }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    padding: 9px 14px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: #444;
+    border-bottom: 1px solid #1e1e1e;
+  }
+  td { padding: 10px 14px; border-bottom: 1px solid #1a1a1a; color: #ccc; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #1c1c1c; }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 99px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge-smash   { background: #ff6b3520; color: #ff6b35; }
+  .badge-forehand{ background: #00e5ff18; color: #00e5ff; }
+  .badge-backhand{ background: #a78bfa20; color: #a78bfa; }
+  .badge-lift    { background: #4caf7d20; color: #4caf7d; }
+  .badge-netshot { background: #fbbf2420; color: #fbbf24; }
+  .badge-service { background: #f472b620; color: #f472b6; }
+  .badge-ready   { background: #66666620; color: #888; }
+  .badge-weak    { background: #ff000018; color: #ff4444; }
+  .badge-ok      { background: #00ff0010; color: #4caf7d; }
+
+  /* Downloads */
+  .downloads-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 32px;
+  }
+  .dl-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 16px;
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    color: #aaa;
+    text-decoration: none;
+    font-size: 13px;
+    transition: background 0.15s, color 0.15s;
+  }
+  .dl-btn:hover { background: #222; color: #fff; }
+  .dl-btn i { font-size: 16px; }
+
+  /* Video */
+  .video-card {
+    background: #111;
+    border: 1px solid #222;
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .video-card h3 {
+    font-size: 13px;
+    font-weight: 500;
+    color: #888;
+    padding: 14px 18px;
+    border-bottom: 1px solid #1e1e1e;
+  }
+  video { width: 100%; display: block; max-height: 480px; background: #000; }
+
+  /* Transition matrix */
+  .matrix-card {
+    background: #161616;
+    border: 1px solid #222;
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .matrix-card h3 {
+    font-size: 13px;
+    font-weight: 500;
+    color: #888;
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid #1e1e1e;
+  }
+  .matrix-wrap { overflow-x: auto; padding: 12px 16px; }
+  .matrix-table { border-collapse: collapse; font-size: 12px; }
+  .matrix-table th, .matrix-table td { padding: 6px 10px; text-align: center; }
+  .matrix-table th { color: #555; font-weight: 500; }
+  .matrix-table td { color: #ccc; border-radius: 4px; min-width: 40px; }
+
+  .error-box {
+    background: #1a0a0a;
+    border: 1px solid #3a1a1a;
+    border-radius: 10px;
+    padding: 20px 24px;
+    color: #ff6b6b;
+    font-size: 14px;
+    margin-bottom: 20px;
+  }
+  .error-box pre {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #884444;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <i class="ti ti-tennis topbar-icon" aria-hidden="true"></i>
+  <h1>Badminton Analyzer <span>— tactical video analysis</span></h1>
+</div>
+
+<div class="container">
+
+  <!-- Upload -->
+  <div class="upload-section">
+    <div class="upload-card" id="dropzone"
+         onclick="document.getElementById('fileInput').click()"
+         ondragover="onDragOver(event)"
+         ondragleave="onDragLeave(event)"
+         ondrop="onDrop(event)">
+      <div class="upload-icon"><i class="ti ti-video-plus" aria-hidden="true"></i></div>
+      <strong>Drop a badminton video here</strong>
+      <p>or click to browse &mdash; .mp4 files only</p>
+      <input type="file" id="fileInput" accept="video/mp4" onchange="onFileSelected(this)">
+    </div>
+    <div id="filename-label"></div>
+    <button class="btn-analyze" id="analyzeBtn" onclick="analyze()" disabled>
+      <i class="ti ti-player-play" aria-hidden="true"></i> Analyze Video
+    </button>
+  </div>
+
+  <!-- Progress -->
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-label">Running analysis pipeline</div>
+    <div class="progress-bar-track"><div class="progress-bar-fill"></div></div>
+    <div class="progress-status" id="progressStatus">Uploading video...</div>
+  </div>
+
+  <!-- Error -->
+  <div class="error-box" id="errorBox" style="display:none"></div>
+
+  <!-- Dashboard -->
+  <div id="dashboard">
+
+    <div class="section-label">Summary</div>
+    <div class="metrics-grid" id="metricsGrid"></div>
+
+    <div class="section-label">Shot distribution &amp; weak shots</div>
+    <div class="charts-row">
+      <div class="chart-card">
+        <h3>Shot type distribution</h3>
+        <div style="position:relative;height:240px;">
+          <canvas id="shotDistChart" role="img" aria-label="Shot type distribution pie chart"></canvas>
+        </div>
+        <div id="shotDistLegend" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;font-size:12px;color:#666;"></div>
+      </div>
+      <div class="chart-card">
+        <h3>Weak shots per shot type</h3>
+        <div style="position:relative;height:240px;">
+          <canvas id="weakChart" role="img" aria-label="Weak shots bar chart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="charts-row">
+      <div class="chart-card">
+        <h3>Shot timeline (shots over time)</h3>
+        <div style="position:relative;height:200px;">
+          <canvas id="timelineChart" role="img" aria-label="Shot timeline chart"></canvas>
+        </div>
+      </div>
+      <div class="chart-card">
+        <h3>Shuttle in/out of court</h3>
+        <div style="position:relative;height:200px;">
+          <canvas id="courtChart" role="img" aria-label="Court in/out pie chart"></canvas>
+        </div>
+        <div id="courtLegend" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;font-size:12px;color:#666;"></div>
+      </div>
+    </div>
+
+    <div class="section-label">Shot events</div>
+    <div class="table-card">
+      <h3>Detected shots <span id="shotCountLabel" style="color:#444;font-weight:400;"></span></h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Time</th>
+              <th>Shot type</th>
+              <th>Confidence</th>
+              <th>Shuttle</th>
+              <th>Inside court</th>
+              <th>Weak shot</th>
+            </tr>
+          </thead>
+          <tbody id="shotTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section-label">Output video</div>
+    <div class="video-card">
+      <h3>Annotated output</h3>
+      <video id="outputVideo" controls></video>
+    </div>
+
+    <div class="section-label">Downloads</div>
+    <div class="downloads-row">
+      <a class="dl-btn" id="dlShot" href="#"><i class="ti ti-table-export"></i> Shot CSV</a>
+      <a class="dl-btn" id="dlFrame" href="#"><i class="ti ti-table-export"></i> Frame CSV</a>
+      <a class="dl-btn" id="dlJson" href="#"><i class="ti ti-file-code"></i> M2 JSON</a>
+    </div>
+
+  </div><!-- /dashboard -->
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+let selectedFile = null;
+let shotDistChartInst = null;
+let weakChartInst = null;
+let timelineChartInst = null;
+let courtChartInst = null;
+
+const SHOT_COLORS = {
+  Smash:         '#ff6b35',
+  ForeHand:      '#00e5ff',
+  BackHand:      '#a78bfa',
+  Lift:          '#4caf7d',
+  NetShot:       '#fbbf24',
+  Service:       '#f472b6',
+  ReadyPosition: '#666666',
+};
+
+function shotColor(name) {
+  return SHOT_COLORS[name] || '#888888';
+}
+
+function shotBadge(name) {
+  const map = {
+    Smash:'smash', ForeHand:'forehand', BackHand:'backhand',
+    Lift:'lift', NetShot:'netshot', Service:'service', ReadyPosition:'ready'
+  };
+  const cls = map[name] || 'ready';
+  return `<span class="badge badge-${cls}">${name}</span>`;
+}
+
+// Drag & drop
+function onDragOver(e) { e.preventDefault(); document.getElementById('dropzone').classList.add('dragover'); }
+function onDragLeave(e) { document.getElementById('dropzone').classList.remove('dragover'); }
+function onDrop(e) {
+  e.preventDefault();
+  document.getElementById('dropzone').classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f && f.name.endsWith('.mp4')) setFile(f);
+}
+
+function onFileSelected(inp) { if (inp.files[0]) setFile(inp.files[0]); }
+function setFile(f) {
+  selectedFile = f;
+  document.getElementById('filename-label').textContent = f.name + ' (' + (f.size/1024/1024).toFixed(1) + ' MB)';
+  document.getElementById('analyzeBtn').disabled = false;
+}
+
+function setProgress(msg) { document.getElementById('progressStatus').textContent = msg; }
+
+async function analyze() {
+  if (!selectedFile) return;
+  const btn = document.getElementById('analyzeBtn');
+  btn.disabled = true;
+  document.getElementById('errorBox').style.display = 'none';
+  document.getElementById('dashboard').classList.remove('visible');
+  document.getElementById('progressWrap').classList.add('active');
+  setProgress('Uploading video...');
+
+  const fd = new FormData();
+  fd.append('video', selectedFile);
+
+  try {
+    setProgress('Running TrackNetV3 shuttle tracking (this takes a few minutes)...');
+    const res  = await fetch('/analyze', { method: 'POST', body: fd });
+    const data = await res.json();
+    document.getElementById('progressWrap').classList.remove('active');
+
+    if (!res.ok || data.error) {
+      const eb = document.getElementById('errorBox');
+      eb.style.display = 'block';
+      eb.innerHTML = '<strong>Error:</strong> ' + (data.error || 'Unknown error') +
+        (data.details ? '<pre>' + data.details + '</pre>' : '');
+      btn.disabled = false;
+      return;
+    }
+
+    renderDashboard(data);
+  } catch (e) {
+    document.getElementById('progressWrap').classList.remove('active');
+    const eb = document.getElementById('errorBox');
+    eb.style.display = 'block';
+    eb.textContent = 'Request failed: ' + e.message;
+    btn.disabled = false;
+  }
+}
+
+function renderDashboard(d) {
+  const shots = d.shots || [];
+  const total = d.total_shots || 0;
+  const dist  = d.shot_distribution || {};
+
+  const weakShots    = shots.filter(s => s.weak_shot_binary === 1).length;
+  const insideCount  = shots.filter(s => s.inside_court === true).length;
+  const outsideCount = shots.filter(s => s.inside_court === false).length;
+  const topShot      = Object.entries(dist).sort((a,b)=>b[1]-a[1])[0];
+
+  // Metrics
+  const metricsGrid = document.getElementById('metricsGrid');
+  metricsGrid.innerHTML = `
+    <div class="metric-card">
+      <div class="val cyan">${total}</div>
+      <div class="lbl">Total shots</div>
+    </div>
+    <div class="metric-card">
+      <div class="val orange">${weakShots}</div>
+      <div class="lbl">Weak shots</div>
+      <div class="sub">${total ? Math.round(weakShots/total*100) : 0}% of total</div>
+    </div>
+    <div class="metric-card">
+      <div class="val green">${insideCount}</div>
+      <div class="lbl">Shuttle in court</div>
+    </div>
+    <div class="metric-card">
+      <div class="val" style="color:#ff4444">${outsideCount}</div>
+      <div class="lbl">Shuttle out</div>
+    </div>
+    <div class="metric-card">
+      <div class="val purple">${topShot ? topShot[1] + '%' : '—'}</div>
+      <div class="lbl">Most used</div>
+      <div class="sub">${topShot ? topShot[0] : ''}</div>
+    </div>
+    <div class="metric-card">
+      <div class="val">${shots.length > 0 ? shots[shots.length-1].time_sec + 's' : '—'}</div>
+      <div class="lbl">Last shot time</div>
+    </div>
+  `;
+
+  // Shot distribution pie
+  const distLabels = Object.keys(dist);
+  const distVals   = Object.values(dist);
+  const distColors = distLabels.map(shotColor);
+
+  if (shotDistChartInst) shotDistChartInst.destroy();
+  shotDistChartInst = new Chart(document.getElementById('shotDistChart'), {
+    type: 'doughnut',
+    data: {
+      labels: distLabels,
+      datasets: [{ data: distVals, backgroundColor: distColors.map(c=>c+'cc'), borderColor: distColors, borderWidth: 1.5 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '60%',
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed}%` } } }
+    }
+  });
+  const legend = document.getElementById('shotDistLegend');
+  legend.innerHTML = distLabels.map((l,i) =>
+    `<span style="display:flex;align-items:center;gap:5px;">
+      <span style="width:10px;height:10px;border-radius:2px;background:${distColors[i]};flex-shrink:0;"></span>${l} ${distVals[i]}%
+    </span>`
+  ).join('');
+
+  // Weak shots per shot type bar
+  const weakByType = {};
+  const totalByType = {};
+  shots.forEach(s => {
+    totalByType[s.shot_type] = (totalByType[s.shot_type] || 0) + 1;
+    if (s.weak_shot_binary === 1) weakByType[s.shot_type] = (weakByType[s.shot_type] || 0) + 1;
+  });
+  const weakLabels = Object.keys(totalByType);
+  const weakVals   = weakLabels.map(k => weakByType[k] || 0);
+  const totalVals  = weakLabels.map(k => totalByType[k] || 0);
+
+  if (weakChartInst) weakChartInst.destroy();
+  weakChartInst = new Chart(document.getElementById('weakChart'), {
+    type: 'bar',
+    data: {
+      labels: weakLabels,
+      datasets: [
+        { label: 'Weak', data: weakVals, backgroundColor: '#ff443388', borderColor: '#ff4433', borderWidth: 1 },
+        { label: 'Normal', data: weakLabels.map((k,i) => totalVals[i] - weakVals[i]), backgroundColor: '#4caf7d44', borderColor: '#4caf7d', borderWidth: 1 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { stacked: true, ticks: { color: '#555', font: { size: 11 } }, grid: { color: '#1e1e1e' } },
+        y: { stacked: true, ticks: { color: '#555', font: { size: 11 } }, grid: { color: '#1e1e1e' } }
+      }
+    }
+  });
+
+  // Timeline chart — shots per 10-second bucket
+  const buckets = {};
+  shots.forEach(s => {
+    const b = Math.floor(s.time_sec / 10) * 10;
+    buckets[b] = (buckets[b] || 0) + 1;
+  });
+  const tLabels = Object.keys(buckets).sort((a,b)=>a-b).map(k => k + 's');
+  const tVals   = Object.keys(buckets).sort((a,b)=>a-b).map(k => buckets[k]);
+
+  if (timelineChartInst) timelineChartInst.destroy();
+  timelineChartInst = new Chart(document.getElementById('timelineChart'), {
+    type: 'line',
+    data: {
+      labels: tLabels,
+      datasets: [{ label: 'Shots', data: tVals, borderColor: '#00e5ff', backgroundColor: '#00e5ff18', fill: true, tension: 0.4, pointRadius: 3, pointBackgroundColor: '#00e5ff' }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#555', font: { size: 11 }, maxRotation: 45 }, grid: { color: '#1e1e1e' } },
+        y: { ticks: { color: '#555', font: { size: 11 } }, grid: { color: '#1e1e1e' } }
+      }
+    }
+  });
+
+  // In/out court pie
+  const courtData  = [insideCount, outsideCount, shots.length - insideCount - outsideCount];
+  const courtLabels= ['Inside', 'Outside', 'Unknown'];
+  const courtColors= ['#4caf7d', '#ff4444', '#444'];
+
+  if (courtChartInst) courtChartInst.destroy();
+  courtChartInst = new Chart(document.getElementById('courtChart'), {
+    type: 'pie',
+    data: {
+      labels: courtLabels,
+      datasets: [{ data: courtData, backgroundColor: courtColors.map(c=>c+'bb'), borderColor: courtColors, borderWidth: 1.5 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed}` } } }
+    }
+  });
+  document.getElementById('courtLegend').innerHTML = courtLabels.map((l,i) =>
+    `<span style="display:flex;align-items:center;gap:5px;">
+      <span style="width:10px;height:10px;border-radius:2px;background:${courtColors[i]};flex-shrink:0;"></span>${l}: ${courtData[i]}
+    </span>`
+  ).join('');
+
+  // Shot table
+  document.getElementById('shotCountLabel').textContent = `(showing ${shots.length} of ${total})`;
+  const tbody = document.getElementById('shotTableBody');
+  tbody.innerHTML = shots.map(s => `
+    <tr>
+      <td style="color:#555">${s.shot_number}</td>
+      <td>${s.time_sec}s</td>
+      <td>${shotBadge(s.shot_type)}</td>
+      <td>${s.confidence !== undefined ? Math.round(s.confidence * 100) + '%' : '—'}</td>
+      <td style="color:#666;font-size:12px">${s.shuttle_x != null ? s.shuttle_x + ', ' + s.shuttle_y : '—'}</td>
+      <td>${s.inside_court === true ? '<span style="color:#4caf7d">Yes</span>' : s.inside_court === false ? '<span style="color:#ff4444">No</span>' : '<span style="color:#555">—</span>'}</td>
+      <td>${s.weak_shot_binary === 1
+        ? '<span class="badge badge-weak">Weak</span>'
+        : '<span class="badge badge-ok">OK</span>'}</td>
+    </tr>
+  `).join('');
+
+  // Video
+  document.getElementById('outputVideo').src = d.video;
+
+  // Downloads
+  document.getElementById('dlShot').href  = d.shot_csv;
+  document.getElementById('dlFrame').href = d.frame_csv;
+  document.getElementById('dlJson').href  = d.m2_json;
+
+  document.getElementById('dashboard').classList.add('visible');
+  document.getElementById('analyzeBtn').disabled = false;
+}
+</script>
+</body>
+</html>

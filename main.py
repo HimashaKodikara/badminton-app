@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from ultralytics import YOLO
 from deep_sort_realtime.deepsort_tracker import DeepSort
+import imageio_ffmpeg
 
 # =========================
 # PATH CONFIG
@@ -637,12 +638,40 @@ async def analyze(video: UploadFile = File(...)):
     tracker = DeepSort(max_age=30, n_init=3, nms_max_overlap=0.7, max_cosine_distance=0.3)
 
     cap = cv2.VideoCapture(str(video_path))
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps is None or fps <= 0:
+        fps = 30
+
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    if width <= 0 or height <= 0:
+        width = 1280
+        height = 720
+
+    print(f"Video Info -> FPS: {fps}, Width: {width}, Height: {height}", flush=True)
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    fps = int(fps) if fps and fps > 0 else 30
+
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     output_video = OUTPUTS_DIR / f"{job_id}_output.mp4"
-    writer = cv2.VideoWriter(str(output_video), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+
+    writer = cv2.VideoWriter(
+        str(output_video),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        fps,
+        (width, height)
+    )
+
+    print("Writer opened:", writer.isOpened(), flush=True)
+
+    if not writer.isOpened():
+        raise RuntimeError(f"VideoWriter failed to open: {output_video}")
+
+    print(f"Writing output video to: {output_video}", flush=True)
 
     frame_records = []
     shot_records = []
@@ -778,6 +807,7 @@ async def analyze(video: UploadFile = File(...)):
             2,
         )
 
+        frame = cv2.resize(frame, (width, height))
         writer.write(frame)
 
         if current_shot != "Unknown" and current_shot != last_shot and frame_no - last_shot_frame > shot_cooldown:
@@ -831,7 +861,36 @@ async def analyze(video: UploadFile = File(...)):
         )
 
     cap.release()
-    writer.release()
+
+    if writer is not None:
+        writer.release()
+        
+        browser_video = OUTPUTS_DIR / f"{job_id}_output_browser.mp4"
+
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+        ffmpeg_cmd = [
+            ffmpeg_exe,
+            "-y",
+            "-i", str(output_video),
+            "-vcodec", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            str(browser_video),
+        ]
+
+        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+
+        if result.returncode != 0:
+            print("FFmpeg conversion failed:", result.stderr, flush=True)
+            browser_video = output_video
+
+    cv2.destroyAllWindows()
+
+    print(f"Saved output video: {output_video}", flush=True)
+
+    if output_video.exists():
+        print(f"Output video size: {output_video.stat().st_size} bytes", flush=True)
 
     output_paths = {
         "shot_csv": OUTPUTS_DIR / f"{job_id}_shots.csv",
@@ -860,12 +919,12 @@ async def analyze(video: UploadFile = File(...)):
             "job_id": job_id,
             "message": "Analysis completed.",
             "processed_frames": frame_no,
-            "video": f"/outputs/{job_id}_output.mp4",
-            "tracknet_shuttle_csv": f"/outputs/{job_id}_shuttle.csv",
+            "video": f"/outputs/{browser_video.name}",            
             "shot_csv": f"/outputs/{job_id}_shots.csv",
             "frame_csv": f"/outputs/{job_id}_frames.csv",
             "shuttle_analysis_csv": f"/outputs/{job_id}_shuttle_analysis.csv",
             "transition_csv": f"/outputs/{job_id}_tactical_transition_matrix.csv",
+            "transition_matrix": {k: dict(v) for k, v in transition_matrix.items()},
             "m2_json": f"/outputs/{job_id}_m2.json",
             "main_json": f"/outputs/{job_id}_main_tactical_output.json",
             "frame_json": f"/outputs/{job_id}_frame_level_output.json",

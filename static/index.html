@@ -333,7 +333,27 @@
   <div id="dashboard">
 
     <div class="section-label">Summary</div>
-    <div class="metrics-grid" id="metricsGrid"></div>
+    <div class="metrics-grid" id="metricsGrid"></div>'
+    
+    <div class="section-label">Output video</div>
+    <div class="video-card">
+      <div class="video-card-header"><h3>Annotated output</h3></div>
+      <video id="outputVideo" controls></video>
+    </div>
+
+    <div class="section-label">Downloads</div>
+    <div class="downloads-row">
+      <a class="dl-btn" id="dlShot" href="#" download><i class="ti ti-table-export"></i> Shot CSV</a>
+      <a class="dl-btn" id="dlFrame" href="#" download><i class="ti ti-table-export"></i> Frame CSV</a>
+      <a class="dl-btn" id="dlShuttleCsv" href="#" download><i class="ti ti-table-export"></i> Shuttle CSV</a>
+      <a class="dl-btn" id="dlTransitionCsv" href="#" download><i class="ti ti-table-export"></i> Transition CSV</a>
+      <a class="dl-btn" id="dlM2Json" href="#" download><i class="ti ti-file-code"></i> M2 JSON</a>
+      <a class="dl-btn" id="dlMainJson" href="#" download><i class="ti ti-file-code"></i> Main Tactical JSON</a>
+      <a class="dl-btn" id="dlFrameJson" href="#" download><i class="ti ti-file-code"></i> Frame JSON</a>
+      <a class="dl-btn" id="dlShotJson" href="#" download><i class="ti ti-file-code"></i> Shot JSON</a>
+      <a class="dl-btn" id="dlShuttleJson" href="#" download><i class="ti ti-file-code"></i> Shuttle JSON</a>
+      <a class="dl-btn" id="dlTransitionJson" href="#" download><i class="ti ti-file-code"></i> Transition JSON</a>
+    </div>
 
     <div class="section-label">Shot distribution &amp; weak shots</div>
     <div class="charts-row">
@@ -352,22 +372,7 @@
       </div>
     </div>
 
-    <div class="charts-row">
-      <div class="chart-card">
-        <h3>Shot timeline (shots over time)</h3>
-        <div style="position:relative;height:180px;">
-          <canvas id="timelineChart" role="img" aria-label="Shot timeline chart"></canvas>
-        </div>
-      </div>
-      <div class="chart-card">
-        <h3>Shuttle in / out of court</h3>
-        <div style="position:relative;height:180px;">
-          <canvas id="courtChart" role="img" aria-label="Court in/out pie chart"></canvas>
-        </div>
-        <div id="courtLegend" class="legend-row"></div>
-      </div>
-    </div>
-
+   
     <div class="section-label">Shot events</div>
     <div class="table-card">
       <div class="table-card-header">
@@ -395,25 +400,7 @@
       </div>
     </div>
 
-    <div class="section-label">Output video</div>
-    <div class="video-card">
-      <div class="video-card-header"><h3>Annotated output</h3></div>
-      <video id="outputVideo" controls></video>
-    </div>
-
-    <div class="section-label">Downloads</div>
-    <div class="downloads-row">
-      <a class="dl-btn" id="dlShot" href="#" download><i class="ti ti-table-export"></i> Shot CSV</a>
-      <a class="dl-btn" id="dlFrame" href="#" download><i class="ti ti-table-export"></i> Frame CSV</a>
-      <a class="dl-btn" id="dlShuttleCsv" href="#" download><i class="ti ti-table-export"></i> Shuttle CSV</a>
-      <a class="dl-btn" id="dlTransitionCsv" href="#" download><i class="ti ti-table-export"></i> Transition CSV</a>
-      <a class="dl-btn" id="dlM2Json" href="#" download><i class="ti ti-file-code"></i> M2 JSON</a>
-      <a class="dl-btn" id="dlMainJson" href="#" download><i class="ti ti-file-code"></i> Main Tactical JSON</a>
-      <a class="dl-btn" id="dlFrameJson" href="#" download><i class="ti ti-file-code"></i> Frame JSON</a>
-      <a class="dl-btn" id="dlShotJson" href="#" download><i class="ti ti-file-code"></i> Shot JSON</a>
-      <a class="dl-btn" id="dlShuttleJson" href="#" download><i class="ti ti-file-code"></i> Shuttle JSON</a>
-      <a class="dl-btn" id="dlTransitionJson" href="#" download><i class="ti ti-file-code"></i> Transition JSON</a>
-    </div>
+    
 
   </div>
 </div>
@@ -463,15 +450,23 @@ function setFile(f) {
   document.getElementById('analyzeBtn').disabled = false;
 }
 
-function setProgress(msg) { document.getElementById('progressStatus').textContent = msg; }
+function setProgress(msg) {
+  const el = document.getElementById('progressStatus');
+  if (el) el.textContent = msg;
+}
+
+// ── Safe getElementById wrapper ──────────────────────────────────
+function el(id) { return document.getElementById(id); }
 
 async function analyze() {
   if (!selectedFile) return;
-  const btn = document.getElementById('analyzeBtn');
+  const btn = el('analyzeBtn');
   btn.disabled = true;
-  document.getElementById('errorBox').style.display = 'none';
-  document.getElementById('dashboard').classList.remove('visible');
-  document.getElementById('progressWrap').classList.add('active');
+  el('errorBox').style.display = 'none';
+  // Hide dashboard while re-running
+  el('dashboard').classList.remove('visible');
+  el('dashboard').style.display = 'none';
+  el('progressWrap').classList.add('active');
   setProgress('Uploading video...');
 
   const fd = new FormData();
@@ -481,10 +476,10 @@ async function analyze() {
     setProgress('Running TrackNetV3 shuttle tracking (this takes a few minutes)...');
     const res  = await fetch('/analyze', { method: 'POST', body: fd });
     const data = await res.json();
-    document.getElementById('progressWrap').classList.remove('active');
+    el('progressWrap').classList.remove('active');
 
     if (!res.ok || data.error) {
-      const eb = document.getElementById('errorBox');
+      const eb = el('errorBox');
       eb.style.display = 'block';
       eb.innerHTML = '<strong>Error:</strong> ' + (data.error || 'Unknown error') +
         (data.details ? '<pre>' + data.details + '</pre>' : '') +
@@ -495,9 +490,16 @@ async function analyze() {
     }
 
     renderDashboard(data);
+
+    const videoEl = el('outputVideo');
+      if (videoEl && d.video) {
+        videoEl.src = d.video + '?t=' + Date.now();
+        videoEl.type = 'video/mp4';
+        videoEl.load();
+}
   } catch (e) {
-    document.getElementById('progressWrap').classList.remove('active');
-    const eb = document.getElementById('errorBox');
+    el('progressWrap').classList.remove('active');
+    const eb = el('errorBox');
     eb.style.display = 'block';
     eb.textContent = 'Request failed: ' + e.message;
     btn.disabled = false;
@@ -505,16 +507,17 @@ async function analyze() {
 }
 
 function setDownload(id, url) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  if (url) { el.href = url; el.style.display = 'inline-flex'; }
-  else { el.href = '#'; el.style.display = 'none'; }
+  const elem = el(id);
+  if (!elem) return;
+  if (url) { elem.href = url; elem.style.display = 'inline-flex'; }
+  else { elem.href = '#'; elem.style.display = 'none'; }
 }
 
 function renderTransitionMatrix(matrix) {
-  const wrap = document.getElementById('transitionMatrixWrap');
+  const wrap = el('transitionMatrixWrap');
   if (!wrap) return;
   const shotTypes = Object.keys(SHOT_COLORS);
+  matrix = matrix || {};
   const hasNested = Object.values(matrix).some(v => typeof v === 'object' && v !== null);
 
   if (!matrix || Object.keys(matrix).length === 0) {
@@ -543,78 +546,86 @@ function renderTransitionMatrix(matrix) {
   wrap.innerHTML = `<table class="matrix-table"><thead><tr><th></th>${header}</tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-const CHART_DEFAULTS = {
-  color: '#6b6a65',
-  plugins: { legend: { display: false } },
-  scales: {
-    x: { ticks: { color: '#aaa9a3', font: { size: 11, family: 'DM Sans' } }, grid: { color: '#e5e4e0' } },
-    y: { ticks: { color: '#aaa9a3', font: { size: 11, family: 'DM Sans' } }, grid: { color: '#e5e4e0' } }
-  }
-};
-
 function renderDashboard(d) {
   const shots = d.shots || [];
   const total = d.total_shots || 0;
   const dist  = d.shot_distribution || {};
 
+  // ── CRITICAL: make dashboard visible BEFORE touching canvases ──
+  // Chart.js needs the canvases to be in the rendered layout to get
+  // a valid 2D context. Showing the element first fixes the null error.
+  const dashboard = el('dashboard');
+  dashboard.style.display = 'block';
+  dashboard.classList.add('visible');
+
   const weakShots    = shots.filter(s => s.weak_shot_binary === 1).length;
   const insideCount  = shots.filter(s => s.inside_court === true).length;
   const outsideCount = shots.filter(s => s.inside_court === false).length;
-  const topShot      = Object.entries(dist).sort((a,b)=>b[1]-a[1])[0];
+  const topShot      = Object.entries(dist).sort((a,b) => b[1] - a[1])[0];
 
-  // Metrics
-  document.getElementById('metricsGrid').innerHTML = `
-    <div class="metric-card">
-      <div class="lbl">Total shots</div>
-      <div class="val blue">${total}</div>
-    </div>
-    <div class="metric-card">
-      <div class="lbl">Weak shots</div>
-      <div class="val orange">${weakShots}</div>
-      <div class="sub">${total ? Math.round(weakShots/total*100) : 0}% of total</div>
-    </div>
-    <div class="metric-card">
-      <div class="lbl">Shuttle in court</div>
-      <div class="val green">${insideCount}</div>
-    </div>
-    <div class="metric-card">
-      <div class="lbl">Shuttle out</div>
-      <div class="val red">${outsideCount}</div>
-    </div>
-    <div class="metric-card">
-      <div class="lbl">Most used</div>
-      <div class="val purple">${topShot ? topShot[1] + '%' : '—'}</div>
-      <div class="sub">${topShot ? topShot[0] : ''}</div>
-    </div>
-    <div class="metric-card">
-      <div class="lbl">Last shot time</div>
-      <div class="val">${shots.length > 0 ? shots[shots.length-1].time_sec + 's' : '—'}</div>
-    </div>
-  `;
+  // ── Metrics ──────────────────────────────────────────────────────
+  const metricsGrid = el('metricsGrid');
+  if (metricsGrid) {
+    metricsGrid.innerHTML = `
+      <div class="metric-card">
+        <div class="lbl">Total shots</div>
+        <div class="val blue">${total}</div>
+      </div>
+      <div class="metric-card">
+        <div class="lbl">Weak shots</div>
+        <div class="val orange">${weakShots}</div>
+        <div class="sub">${total ? Math.round(weakShots/total*100) : 0}% of total</div>
+      </div>
+      <div class="metric-card">
+        <div class="lbl">Shuttle in court</div>
+        <div class="val green">${insideCount}</div>
+      </div>
+      <div class="metric-card">
+        <div class="lbl">Shuttle out</div>
+        <div class="val red">${outsideCount}</div>
+      </div>
+      <div class="metric-card">
+        <div class="lbl">Most used</div>
+        <div class="val purple">${topShot ? topShot[1] + '%' : '—'}</div>
+        <div class="sub">${topShot ? topShot[0] : ''}</div>
+      </div>
+      <div class="metric-card">
+        <div class="lbl">Last shot time</div>
+        <div class="val">${shots.length > 0 ? shots[shots.length-1].time_sec + 's' : '—'}</div>
+      </div>
+    `;
+  }
 
-  // Shot distribution pie
+  // ── Shot distribution pie ─────────────────────────────────────────
   const distLabels = Object.keys(dist);
   const distVals   = Object.values(dist);
   const distColors = distLabels.map(shotColor);
 
-  if (shotDistChartInst) shotDistChartInst.destroy();
-  shotDistChartInst = new Chart(document.getElementById('shotDistChart'), {
-    type: 'doughnut',
-    data: {
-      labels: distLabels,
-      datasets: [{ data: distVals, backgroundColor: distColors.map(c=>c+'cc'), borderColor: '#ffffff', borderWidth: 2 }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false, cutout: '62%',
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed}%` } } }
-    }
-  });
-  document.getElementById('shotDistLegend').innerHTML = distLabels.map((l,i) =>
-    `<span style="display:flex;align-items:center;gap:5px;">
-      <span class="legend-dot" style="background:${distColors[i]}"></span>${l} ${distVals[i]}%
-    </span>`).join('');
+  const shotDistCanvas = el('shotDistChart');
+  if (shotDistCanvas) {
+    if (shotDistChartInst) shotDistChartInst.destroy();
+    shotDistChartInst = new Chart(shotDistCanvas, {
+      type: 'doughnut',
+      data: {
+        labels: distLabels,
+        datasets: [{ data: distVals, backgroundColor: distColors.map(c => c + 'cc'), borderColor: '#ffffff', borderWidth: 2 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: '62%',
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed}%` } } }
+      }
+    });
+  }
 
-  // Weak shots bar
+  const shotDistLegend = el('shotDistLegend');
+  if (shotDistLegend) {
+    shotDistLegend.innerHTML = distLabels.map((l, i) =>
+      `<span style="display:flex;align-items:center;gap:5px;">
+        <span class="legend-dot" style="background:${distColors[i]}"></span>${l} ${distVals[i]}%
+      </span>`).join('');
+  }
+
+  // ── Weak shots bar ────────────────────────────────────────────────
   const weakByType = {}, totalByType = {};
   shots.forEach(s => {
     totalByType[s.shot_type] = (totalByType[s.shot_type] || 0) + 1;
@@ -624,94 +635,118 @@ function renderDashboard(d) {
   const weakVals   = weakLabels.map(k => weakByType[k] || 0);
   const totalVals  = weakLabels.map(k => totalByType[k] || 0);
 
-  if (weakChartInst) weakChartInst.destroy();
-  weakChartInst = new Chart(document.getElementById('weakChart'), {
-    type: 'bar',
-    data: {
-      labels: weakLabels,
-      datasets: [
-        { label: 'Weak',   data: weakVals, backgroundColor: '#f0959599', borderColor: '#b83232', borderWidth: 1 },
-        { label: 'Normal', data: weakLabels.map((_,i) => totalVals[i] - weakVals[i]), backgroundColor: '#9fe1cb88', borderColor: '#1a7a4a', borderWidth: 1 },
-      ]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { stacked: true, ticks: { color: '#aaa9a3', font: { size: 11 } }, grid: { color: '#e5e4e0' } },
-        y: { stacked: true, ticks: { color: '#aaa9a3', font: { size: 11 } }, grid: { color: '#e5e4e0' } }
+  const weakCanvas = el('weakChart');
+  if (weakCanvas) {
+    if (weakChartInst) weakChartInst.destroy();
+    weakChartInst = new Chart(weakCanvas, {
+      type: 'bar',
+      data: {
+        labels: weakLabels,
+        datasets: [
+          { label: 'Weak',   data: weakVals, backgroundColor: '#f0959599', borderColor: '#b83232', borderWidth: 1 },
+          { label: 'Normal', data: weakLabels.map((_, i) => totalVals[i] - weakVals[i]), backgroundColor: '#9fe1cb88', borderColor: '#1a7a4a', borderWidth: 1 },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { stacked: true, ticks: { color: '#aaa9a3', font: { size: 11 } }, grid: { color: '#e5e4e0' } },
+          y: { stacked: true, ticks: { color: '#aaa9a3', font: { size: 11 } }, grid: { color: '#e5e4e0' } }
+        }
       }
-    }
-  });
+    });
+  }
 
-  // Timeline
+  // ── Timeline ──────────────────────────────────────────────────────
   const buckets = {};
   shots.forEach(s => {
     const b = Math.floor(s.time_sec / 10) * 10;
     buckets[b] = (buckets[b] || 0) + 1;
   });
-  const tLabels = Object.keys(buckets).sort((a,b)=>a-b).map(k => k + 's');
-  const tVals   = Object.keys(buckets).sort((a,b)=>a-b).map(k => buckets[k]);
+  const tLabels = Object.keys(buckets).sort((a, b) => a - b).map(k => k + 's');
+  const tVals   = Object.keys(buckets).sort((a, b) => a - b).map(k => buckets[k]);
 
-  if (timelineChartInst) timelineChartInst.destroy();
-  timelineChartInst = new Chart(document.getElementById('timelineChart'), {
-    type: 'line',
-    data: {
-      labels: tLabels,
-      datasets: [{ label: 'Shots', data: tVals, borderColor: '#1a7a4a', backgroundColor: '#1a7a4a18', fill: true, tension: 0.4, pointRadius: 3, pointBackgroundColor: '#1a7a4a', borderWidth: 2 }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { ticks: { color: '#aaa9a3', font: { size: 11 }, maxRotation: 40 }, grid: { color: '#e5e4e0' } },
-        y: { ticks: { color: '#aaa9a3', font: { size: 11 } }, grid: { color: '#e5e4e0' } }
+  const timelineCanvas = el('timelineChart');
+  if (timelineCanvas) {
+    if (timelineChartInst) timelineChartInst.destroy();
+    timelineChartInst = new Chart(timelineCanvas, {
+      type: 'line',
+      data: {
+        labels: tLabels,
+        datasets: [{ label: 'Shots', data: tVals, borderColor: '#1a7a4a', backgroundColor: '#1a7a4a18', fill: true, tension: 0.4, pointRadius: 3, pointBackgroundColor: '#1a7a4a', borderWidth: 2 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#aaa9a3', font: { size: 11 }, maxRotation: 40 }, grid: { color: '#e5e4e0' } },
+          y: { ticks: { color: '#aaa9a3', font: { size: 11 } }, grid: { color: '#e5e4e0' } }
+        }
       }
-    }
-  });
+    });
+  }
 
-  // In/out court pie
-  const courtData  = [insideCount, outsideCount, shots.length - insideCount - outsideCount];
-  const courtLabels= ['Inside', 'Outside', 'Unknown'];
-  const courtColors= ['#1a7a4a', '#b83232', '#aaa9a3'];
+  // ── In/out court pie ──────────────────────────────────────────────
+  const courtData   = [insideCount, outsideCount, shots.length - insideCount - outsideCount];
+  const courtLabels = ['Inside', 'Outside', 'Unknown'];
+  const courtColors = ['#1a7a4a', '#b83232', '#aaa9a3'];
 
-  if (courtChartInst) courtChartInst.destroy();
-  courtChartInst = new Chart(document.getElementById('courtChart'), {
-    type: 'pie',
-    data: {
-      labels: courtLabels,
-      datasets: [{ data: courtData, backgroundColor: courtColors.map(c=>c+'bb'), borderColor: '#ffffff', borderWidth: 2 }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed}` } } }
-    }
-  });
-  document.getElementById('courtLegend').innerHTML = courtLabels.map((l,i) =>
-    `<span style="display:flex;align-items:center;gap:5px;">
-      <span class="legend-dot" style="background:${courtColors[i]}"></span>${l}: ${courtData[i]}
-    </span>`).join('');
+  const courtCanvas = el('courtChart');
+  if (courtCanvas) {
+    if (courtChartInst) courtChartInst.destroy();
+    courtChartInst = new Chart(courtCanvas, {
+      type: 'pie',
+      data: {
+        labels: courtLabels,
+        datasets: [{ data: courtData, backgroundColor: courtColors.map(c => c + 'bb'), borderColor: '#ffffff', borderWidth: 2 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed}` } } }
+      }
+    });
+  }
 
-  // Shot table
-  document.getElementById('shotCountLabel').textContent = `${shots.length} of ${total}`;
-  document.getElementById('shotTableBody').innerHTML = shots.map(s => `
-    <tr>
-      <td style="color:var(--text-muted);font-family:'DM Mono',monospace">${s.shot_number}</td>
-      <td style="font-family:'DM Mono',monospace;color:var(--text-secondary)">${s.time_sec}s</td>
-      <td>${shotBadge(s.shot_type)}</td>
-      <td style="font-family:'DM Mono',monospace">${s.confidence !== undefined ? Math.round(s.confidence * 100) + '%' : '—'}</td>
-      <td style="color:var(--text-muted);font-size:12px;font-family:'DM Mono',monospace">${s.shuttle_x != null ? s.shuttle_x + ', ' + s.shuttle_y : '—'}</td>
-      <td>${s.inside_court === true ? '<span style="color:var(--accent);font-weight:500">Yes</span>' : s.inside_court === false ? '<span style="color:var(--red)">No</span>' : '<span style="color:var(--text-muted)">—</span>'}</td>
-      <td>${s.weak_shot_binary === 1
-        ? '<span class="badge badge-weak">Weak</span>'
-        : '<span class="badge badge-ok">OK</span>'}</td>
-    </tr>
-  `).join('');
+  const courtLegend = el('courtLegend');
+  if (courtLegend) {
+    courtLegend.innerHTML = courtLabels.map((l, i) =>
+      `<span style="display:flex;align-items:center;gap:5px;">
+        <span class="legend-dot" style="background:${courtColors[i]}"></span>${l}: ${courtData[i]}
+      </span>`).join('');
+  }
 
-  document.getElementById('outputVideo').src = d.video;
+  // ── Shot table ────────────────────────────────────────────────────
+  const shotCountLabel = el('shotCountLabel');
+  if (shotCountLabel) shotCountLabel.textContent = `${shots.length} of ${total}`;
 
+  const shotTableBody = el('shotTableBody');
+  if (shotTableBody) {
+    shotTableBody.innerHTML = shots.map(s => `
+      <tr>
+        <td style="color:var(--text-muted);font-family:'DM Mono',monospace">${s.shot_number}</td>
+        <td style="font-family:'DM Mono',monospace;color:var(--text-secondary)">${s.time_sec}s</td>
+        <td>${shotBadge(s.shot_type)}</td>
+        <td style="font-family:'DM Mono',monospace">${s.confidence !== undefined ? Math.round(s.confidence * 100) + '%' : '—'}</td>
+        <td style="color:var(--text-muted);font-size:12px;font-family:'DM Mono',monospace">${s.shuttle_x != null ? s.shuttle_x + ', ' + s.shuttle_y : '—'}</td>
+        <td>${s.inside_court === true ? '<span style="color:var(--accent);font-weight:500">Yes</span>' : s.inside_court === false ? '<span style="color:var(--red)">No</span>' : '<span style="color:var(--text-muted)">—</span>'}</td>
+        <td>${s.weak_shot_binary === 1
+          ? '<span class="badge badge-weak">Weak</span>'
+          : '<span class="badge badge-ok">No</span>'}</td>
+      </tr>
+    `).join('');
+  }
+
+  // ── Video ─────────────────────────────────────────────────────────
+  const outputVideo = el('outputVideo');
+  if (outputVideo) outputVideo.src = d.video;
+
+  video.src = safeVideoPath;
+  video.load();
+
+  // ── Transition matrix ─────────────────────────────────────────────
   renderTransitionMatrix(d.transition_matrix || {});
-
+  // ── Downloads ─────────────────────────────────────────────────────
   setDownload('dlShot', d.shot_csv);
   setDownload('dlFrame', d.frame_csv);
   setDownload('dlShuttleCsv', d.shuttle_analysis_csv || d.tracknet_shuttle_csv);
@@ -723,8 +758,7 @@ function renderDashboard(d) {
   setDownload('dlShuttleJson', d.shuttle_json);
   setDownload('dlTransitionJson', d.transition_json);
 
-  document.getElementById('dashboard').classList.add('visible');
-  document.getElementById('analyzeBtn').disabled = false;
+  el('analyzeBtn').disabled = false;
 }
 </script>
 </body>

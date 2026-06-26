@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from ultralytics import YOLO
 from deep_sort_realtime.deepsort_tracker import DeepSort
 import imageio_ffmpeg
+from fastapi import Form
 
 # ============================================================
 # PATH CONFIG - LOCAL CPU VERSION
@@ -83,26 +84,34 @@ app.mount("/outputs", StaticFiles(directory=str(OUTPUTS_DIR)), name="outputs")
 # ============================================================
 # All possible badminton shot types that can be detected
 SHOT_CLASSES = [
+    "BackHand",
+    "ForeHand",
+    "Lift",
+    "NetShot",
     "ReadyPosition",
     "Service",
     "Smash",
-    "BackHand",
-    "Lift",
-    "NetShot",
-    "ForeHand",
-    "DropShot",
 ]
 
 # Shot types where the player actually hits the shuttle (excludes ReadyPosition)
 HIT_SHOT_CLASSES = [
-    "ReadyPosition",
-    "Service",
-    "Smash",
     "BackHand",
+    "ForeHand",
     "Lift",
     "NetShot",
+    "Service",
+    "Smash",
+]
+
+TACTICAL_SHOT_CLASSES = [
+    "BackHand",
     "ForeHand",
+    "Lift",
+    "NetShot",
+    "Service",
+    "Smash",
     "DropShot",
+    "Clear",
 ]
 
 # Minimum time between consecutive weak shot detections (in seconds)
@@ -117,6 +126,7 @@ NET_TOLERANCE = 20
 # Visual offset to adjust net line detection based on your court calibration
 NET_Y_OFFSET = -260
 
+
 # Pairs of court keypoints that form the court lines (for drawing the court)
 COURT_LINE_PAIRS = [
     (0, 1), (1, 2), (2, 3), (3, 4),
@@ -125,6 +135,8 @@ COURT_LINE_PAIRS = [
     (18, 19), (19, 20), (20, 21),
     (5, 17), (17, 18),
 ]
+
+
 
 # Keypoint indexes that define the left side boundary of the court
 LEFT_COURT_POINTS = [17, 15, 12, 10, 7, 5, 0]
@@ -151,18 +163,26 @@ def is_shot_class(name):
 
 # Select the player on the opposite side of the net (usually the top/far player)
 # We focus on the player on the other side because that's who we want to analyze
-def select_other_side_player(detections, frame_h):
+def select_other_side_player(detections, frame_h, court_points=None):
     best = None
     best_score = -1
 
     for det in detections:
         x1, y1, x2, y2 = det["box"]
-        cy = (y1 + y2) / 2  # Center Y coordinate of bounding box
-        area = (x2 - x1) * (y2 - y1)  # Player bounding box area
+        cx = (x1 + x2) / 2
+        cy = (y1 + y2) / 2
+        area = (x2 - x1) * (y2 - y1)
 
-        # Select only players in the upper half of the frame (opposite side)
+        # Filter to upper half of frame (far/opposite player)
         if cy > frame_h * 0.55:
             continue
+
+        # If court points are available, confirm player center is inside court bounds
+        if court_points is not None:
+            left_x, right_x = court_left_right_bounds(cy, court_points)
+            if left_x is not None and right_x is not None:
+                if cx < left_x or cx > right_x:
+                    continue  # Skip players outside court left/right bounds
 
         upper_score = 1 - (cy / frame_h)
         size_score = area / (frame_h * frame_h)
@@ -173,7 +193,6 @@ def select_other_side_player(detections, frame_h):
             best = det
 
     return best
-
 
 # Get shuttle (badminton) position for a given frame from TrackNet predictions
 # Returns: x, y coordinates and visibility score (0=not visible, 1=visible)
@@ -382,18 +401,17 @@ def get_net_y(court_points):
 def get_shuttle_side(sx, sy, court_points):
     if sx is None or sy is None or court_points is None:
         return "unknown"
-
     net_y = get_net_y(court_points)
     if net_y is None:
+        # Fallback: use raw frame height midpoint
         return "unknown"
-
-    # Classify shuttle position relative to the net
+    # "top" = smaller Y values (upper frame), "bottom" = larger Y
     if sy < net_y - NET_TOLERANCE:
-        return "top"  # Above the net
+        return "top"
     elif sy > net_y + NET_TOLERANCE:
-        return "bottom"  # Below the net
+        return "bottom"
     else:
-        return "net_area"  # Near the net
+        return "net_area"
 
 def opposite_court_side(side):
     if side == "top":
@@ -420,26 +438,11 @@ def shuttle_travel_distance_from_attempt(sx, sy, attempt):
     return ((sx - start_x) ** 2 + (sy - start_y) ** 2) ** 0.5
 
 
-def draw_net_line(frame, court_points):
-    net_y = get_net_y(court_points)
 
-    if net_y is None:
-        return frame
-
-    h, w = frame.shape[:2]
-    y = int(net_y)
-
-    # Only one yellow net line
-    cv2.line(frame, (0, y), (w, y), (0, 255, 255), 3)
-    cv2.putText(
-        frame,
-        "NET LINE",
-        (20, max(25, y - 10)),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        (0, 255, 255),
-        2,
-    )
+    # Shade the zone between net and clearance line (semi-transparent orange band)
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (0, y), (w, clearance_y), (0, 100, 255), -1)
+    cv2.addWeighted(overlay, 0.15, frame, 0.85, 0, frame)
 
     return frame
 def draw_net_line(frame, court_points):
@@ -519,6 +522,16 @@ def shuttle_landed_on_floor(shuttle_history, min_frames=5):
 def player_hit_shuttle(current_shot):
     return current_shot in HIT_SHOT_CLASSES
 
+WEAK_SHOT_EXCLUDED_TYPES = ["Service", "ReadyPosition"]
+
+def shuttle_near_net(sy, court_points, margin=60):
+    """True only if shuttle is physically close to the net line."""
+    if sy is None or court_points is None:
+        return False
+    net_y = get_net_y(court_points)
+    if net_y is None:
+        return False
+    return abs(sy - net_y) < margin
 
 def shuttle_near_player(sx, sy, player_box, max_distance=130):
     if sx is None or sy is None or player_box is None:
@@ -562,13 +575,107 @@ def shuttle_direction_or_speed_changed(shuttle_history):
 
     return cosine < 0.55 or speed_change > 20
 
+# ============================================================
+# SHOT CLASSIFICATION FIX - FROM INFERENCING POSE NOTEBOOK STYLE
+# ============================================================
+# In the notebook, the custom badminton model is used for frame-level
+# shot classification, while the baseline pose model is used for cleaner
+# keypoints/player tracking. These helpers make your app use the custom
+# model output more safely.
 
-def valid_shot_event(current_shot, sx, sy, player_box, shuttle_history):
-    return (
-        current_shot in HIT_SHOT_CLASSES
-        and shuttle_near_player(sx, sy, player_box, max_distance=250)
-    )
+SHOT_CONF_THRES = 0.35          # Same idea as notebook CONF_THRES
+SHOT_SMOOTHING_WINDOW = 7       # Majority vote over recent frames
+SHOT_EVENT_COOLDOWN_FRAMES = 12 # Prevent duplicate shot events
 
+def extract_best_shot_from_result(result):
+    """Return best valid shot class from a YOLO result.
+
+    The notebook used custom_result.boxes.cls[0], but that can be wrong
+    when YOLO returns multiple boxes. This version checks all boxes and
+    picks the highest-confidence valid badminton shot class.
+    """
+    if result is None or result.boxes is None or len(result.boxes) == 0:
+        return "unknown", 0.0, None
+
+    best_name = "unknown"
+    best_conf = 0.0
+    best_box = None
+
+    boxes = result.boxes
+    names = result.names
+
+    for i in range(len(boxes)):
+        cls_id = int(boxes.cls[i].item())
+        conf = float(boxes.conf[i].item())
+        raw_name = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else names[cls_id]
+        shot_name = normalize_shot_name(raw_name)
+
+        if shot_name not in SHOT_CLASSES:
+            continue
+        if conf < SHOT_CONF_THRES:
+            continue
+
+        if conf > best_conf:
+            best_name = shot_name
+            best_conf = conf
+            best_box = boxes.xyxy[i].cpu().numpy().tolist()
+
+    return best_name, best_conf, best_box
+
+
+def predict_frame_shot(player_model, frame):
+    """Run custom shot model like the notebook and return clean shot output."""
+    result = player_model.predict(
+        source=frame,
+        conf=SHOT_CONF_THRES,
+        device=YOLO_DEVICE,
+        verbose=False,
+    )[0]
+    return extract_best_shot_from_result(result)
+
+
+def smooth_shot_prediction(shot_history):
+    """Majority vote to reduce frame-by-frame wrong labels."""
+    valid = [s for s in shot_history if s in SHOT_CLASSES and s != "ReadyPosition"]
+    if not valid:
+        return "unknown"
+    return Counter(valid).most_common(1)[0][0]
+
+
+def valid_shot_event(current_shot, sx, sy, player_box, shuttle_history, shot_conf=0.0):
+    """Accept a shot only when model confidence + shuttle-contact evidence agree.
+
+    Your old version used only shot class + shuttle_near_player. This caused
+    wrong repeated shots. This version requires confidence and either shuttle
+    near player or shuttle direction/speed change.
+    """
+    current_shot = normalize_shot_name(current_shot)
+
+    if current_shot not in HIT_SHOT_CLASSES:
+        return False
+
+    if shot_conf < SHOT_CONF_THRES:
+        return False
+
+    near_player = shuttle_near_player(sx, sy, player_box, max_distance=230)
+    trajectory_changed = shuttle_direction_or_speed_changed(shuttle_history)
+
+    return near_player or trajectory_changed
+
+def should_record_new_shot(frame_no, last_shot_frame, current_shot, last_recorded_shot):
+    """Avoid saving the same predicted shot in many consecutive frames."""
+    if current_shot not in HIT_SHOT_CLASSES:
+        return False
+
+    if last_shot_frame is None:
+        return True
+
+    gap = frame_no - last_shot_frame
+
+    if current_shot == last_recorded_shot and gap < SHOT_EVENT_COOLDOWN_FRAMES:
+        return False
+
+    return gap >= max(4, SHOT_EVENT_COOLDOWN_FRAMES // 2)
 
 def hit_attempt_event(current_shot, sx, sy, player_box):
     # Used only for weak-shot detection.
@@ -589,58 +696,80 @@ def clean_value(value):
 # Standardize shot names to match SHOT_CLASSES format
 # Handles variations in naming (e.g., 'serve' -> 'Service')
 def normalize_shot_name(name):
-    name = str(name).strip().lower()
+    raw = str(name).strip()
 
-    # Mapping of various names to standardized shot names
+    key = (
+        raw.lower()
+        .replace(" ", "")
+        .replace("_", "")
+        .replace("-", "")
+    )
+
     mapping = {
         "readyposition": "ReadyPosition",
+        "ready": "ReadyPosition",
+
         "service": "Service",
         "serve": "Service",
+        "serviceshot": "Service",
+        "serveshot": "Service",
+
         "smash": "Smash",
+        "smashshot": "Smash",
+
         "backhand": "BackHand",
         "backhandshot": "BackHand",
-        "lift": "Lift",
-        "netshot": "NetShot",
-        "net": "NetShot",
+
         "forehand": "ForeHand",
         "forehandshot": "ForeHand",
+
+        "lift": "Lift",
+        "liftshot": "Lift",
+
+        "netshot": "NetShot",
+        "net": "NetShot",
+
+        # These are not YOLO classes, only tactical output labels
         "dropshot": "DropShot",
         "drop": "DropShot",
+        "clear": "Clear",
     }
 
-    return mapping.get(name, str(name).strip())
+    return mapping.get(key, raw)
+
 
 def infer_tactical_shot(shot_type, trajectory):
     shot_type = normalize_shot_name(shot_type)
 
-    if shot_type == "forehand":
+    # Only infer DropShot / Clear from ForeHand
+    if shot_type != "ForeHand":
+        return shot_type
 
-        start_pos, end_pos = get_start_end_position(trajectory)
+    start_pos, end_pos = get_start_end_position(trajectory)
 
-        if end_pos["y"] is None or start_pos["y"] is None:
-            return "forehand"
+    if (
+        start_pos["x"] is None or start_pos["y"] is None or
+        end_pos["x"] is None or end_pos["y"] is None
+    ):
+        return "ForeHand"
 
-        travel_y = end_pos["y"] - start_pos["y"]
+    travel_y = end_pos["y"] - start_pos["y"]
 
-        travel_distance = (
-            (end_pos["x"] - start_pos["x"]) ** 2 +
-            (end_pos["y"] - start_pos["y"]) ** 2
-        ) ** 0.5
+    travel_distance = (
+        (end_pos["x"] - start_pos["x"]) ** 2 +
+        (end_pos["y"] - start_pos["y"]) ** 2
+    ) ** 0.5
 
-        landing_near_net = abs(travel_y) < 120 and travel_distance < 180
-        shuttle_speed_low = travel_distance < 180
-        landing_deep_court = travel_distance > 250
+    landing_near_net = abs(travel_y) < 120 and travel_distance < 180
+    landing_deep_court = travel_distance > 250
 
-        if landing_near_net and shuttle_speed_low:
-            return "drop"
+    if landing_near_net:
+        return "DropShot"
 
-        elif landing_deep_court:
-            return "clear"
+    if landing_deep_court:
+        return "Clear"
 
-        else:
-            return "forehand"
-
-    return shot_type
+    return "ForeHand"
 
 def get_court_status(value):
     text = str(value).lower()
@@ -705,13 +834,16 @@ def get_start_end_position(trajectory):
 # ============================================================
 # This function creates all analysis output files (CSVs and JSONs)
 def build_tactical_outputs(
-    job_id,
+     job_id,
     frame_records,
     shot_records,
     weak_shot_records,
     shuttle_records,
     transition_matrix,
+    rally_sequences,
     output_paths,
+    match_id="match_001",
+    player_id="player_01",
 ):
     frame_df = pd.DataFrame(frame_records)
     shot_df = pd.DataFrame(shot_records)
@@ -740,7 +872,7 @@ def build_tactical_outputs(
     shuttle_df.to_json(output_paths["shuttle_json"], orient="records", indent=2)
 
     # Build transition matrix and write as JSON only
-    transition_df = pd.DataFrame(0, index=SHOT_CLASSES, columns=SHOT_CLASSES)
+    transition_df = pd.DataFrame(0, index=TACTICAL_SHOT_CLASSES, columns=TACTICAL_SHOT_CLASSES)    
     for from_shot, next_dict in transition_matrix.items():
         for to_shot, count in next_dict.items():
             if from_shot in transition_df.index and to_shot in transition_df.columns:
@@ -748,27 +880,45 @@ def build_tactical_outputs(
 
     transition_df.to_json(output_paths["transition_json"], orient="records", indent=2)
 
+    
     normal_total_shots = len(shot_records)
     weak_total_shots = len(weak_shot_records)
-
-    percentage_distribution = (
-        {
-            key: round(value / normal_total_shots * 100, 1)
-            for key, value in Counter(s["shot_type"] for s in shot_records).items()
-        }
-        if normal_total_shots
-        else {}
-    )
 
     if shot_df.empty or "shot_type" not in shot_df.columns:
         shot_counts = Counter()
         average_rally_length = 0
     else:
-        shot_type_list = [normalize_shot_name(x) for x in shot_df["shot_type"].fillna("unknown")]
-        shot_counts = Counter([s for s in shot_type_list if s != "unknown"])
-        average_rally_length = shot_df.groupby("rally_id").size().mean() if "rally_id" in shot_df.columns else 0
+        tactical_shot_type_list = []
+
+        for _, row in shot_df.iterrows():
+            raw_type = row.get("shot_type", "unknown")
+            shot_frame = int(row.get("frame", 0))
+            trajectory = get_shot_trajectory(shuttle_df, shot_frame)
+            tactical_type = infer_tactical_shot(raw_type, trajectory)
+
+            if tactical_type != "unknown":
+                tactical_shot_type_list.append(tactical_type)
+
+        shot_counts = Counter(tactical_shot_type_list)
+
+        average_rally_length = (
+            shot_df.groupby("rally_id").size().mean()
+            if "rally_id" in shot_df.columns
+            else 0
+        )
+
         if pd.isna(average_rally_length):
             average_rally_length = 0
+
+    percentage_distribution = (
+        {
+            key: round(value / normal_total_shots * 100, 1)
+            for key, value in shot_counts.items()
+        }
+        if normal_total_shots
+        else {}
+    )
+
 
     current_video_profile = {
         "normal_shot_distribution": dict(shot_counts),
@@ -791,9 +941,7 @@ def build_tactical_outputs(
         court_status = get_court_status(row.get("inside_court"))
         shot_type = infer_tactical_shot(raw_shot_type, trajectory)
 
-        current_frequency = shot_counts.get(
-            normalize_shot_name(raw_shot_type), 0
-        )
+        current_frequency = shot_counts.get(shot_type, 0)
 
         shots.append({
             "shot_id": i + 1,
@@ -886,14 +1034,58 @@ def build_tactical_outputs(
     if total_transitions > 0:
         predictability_score = round(max(current_transition_matrix.values()) / total_transitions, 2)
 
+    # ============================================================
+    # RALLY-BY-RALLY SHOT PATTERN ANALYSIS
+    # ============================================================
+    # rally_sequences format: {1: ["Service", "ForeHand", "NetShot"], ...}
+    # This keeps every rally separate, so transitions do not cross rally boundaries.
+    if rally_sequences is None:
+        rally_sequences = defaultdict(list)
+        for shot in shot_records:
+            derived_rally_id = int(shot.get("rally_id", 1))
+            derived_shot_type = normalize_shot_name(shot.get("shot_type", "Unknown"))
+            rally_sequences[derived_rally_id].append(derived_shot_type)
+
+    rally_patterns = []
+
+    for rally_id, sequence in sorted(rally_sequences.items(), key=lambda item: int(item[0])):
+        normalized_sequence = [normalize_shot_name(s) for s in sequence if normalize_shot_name(s) != "Unknown"]
+
+        rally_patterns.append({
+            "rally_id": int(rally_id),
+            "shot_pattern": normalized_sequence,
+            "pattern_string": " → ".join(normalized_sequence),
+            "pattern_length": len(normalized_sequence),
+        })
+
+    pattern_counts = Counter(
+        " → ".join([normalize_shot_name(s) for s in sequence if normalize_shot_name(s) != "Unknown"])
+        for sequence in rally_sequences.values()
+        if len([s for s in sequence if normalize_shot_name(s) != "Unknown"]) > 1
+    )
+
+    total_patterns = sum(pattern_counts.values())
+
+    pattern_scores = []
+    for pattern, count in pattern_counts.items():
+        pattern_scores.append({
+            "pattern": pattern,
+            "count": int(count),
+            "score": round(count / total_patterns, 3) if total_patterns else 0,
+        })
+
+    pattern_scores = sorted(pattern_scores, key=lambda x: x["score"], reverse=True)
+
     main_output = {
-        "match_id": "match_001",
-        "player_id": "player_01",
+        "match_id": match_id,
+        "player_id": player_id,
         "job_id": job_id,
         "current_video_profile": current_video_profile,
         "normal_shots": shots,
         "weak_shots": weak_shots,
         "rallies": rallies,
+        "rally_patterns": rally_patterns,
+        "pattern_scores": pattern_scores,
         "tactical_patterns": {
             "dominant_shot": dominant_shot,
             "predictability_score": predictability_score,
@@ -906,7 +1098,8 @@ def build_tactical_outputs(
         json.dump(main_output, f, indent=2)
 
     m2_output = {
-        "match_id": "match_001",
+        "match_id": match_id,
+        "player_id": player_id,
         "job_id": job_id,
         "processed_frames": len(frame_records),
         "max_frames_used": MAX_FRAMES,
@@ -915,6 +1108,8 @@ def build_tactical_outputs(
         "total_including_weak": normal_total_shots + weak_total_shots,
         "normal_shot_distribution": percentage_distribution,
         "transition_matrix": {k: dict(v) for k, v in transition_matrix.items()},
+        "rally_patterns": rally_patterns,
+        "pattern_scores": pattern_scores,
         "normal_shots": shot_records,
         "weak_shots": weak_shot_records,
     }
@@ -944,7 +1139,11 @@ def index():
 
 # Main analysis endpoint - processes uploaded video and returns analysis results
 @app.post("/analyze")
-async def analyze(video: UploadFile = File(...)):
+async def analyze(
+    video: UploadFile = File(...),
+    match_id: str = Form("match_001"),
+    player_name: str = Form("player_01"),
+):
     # Generate unique ID for this analysis job
     job_id = str(uuid.uuid4())[:8]
     original_name = Path(video.filename).name
@@ -1047,8 +1246,12 @@ async def analyze(video: UploadFile = File(...)):
 
     # Load pre-trained YOLO models for player and court detection
     print("Loading YOLO models...", flush=True)
-    player_model = YOLO(str(PLAYER_MODEL_PATH))  # Detects players and their shot types
-    court_model = YOLO(str(COURT_MODEL_PATH))  # Detects court keypoints
+
+    player_model = YOLO(str(PLAYER_MODEL_PATH))  # Detects players and shot types
+    court_model = YOLO(str(COURT_MODEL_PATH))    # Detects court keypoints
+
+    print("Loaded player model path:", PLAYER_MODEL_PATH, flush=True)
+    print("YOLO class names:", player_model.names, flush=True)
     # Initialize tracker for identifying the same player across frames
     tracker = DeepSort(max_age=30, n_init=3, nms_max_overlap=0.7, max_cosine_distance=0.3)
 
@@ -1084,8 +1287,9 @@ async def analyze(video: UploadFile = File(...)):
     shot_records = []  # Normal shots detected
     weak_shot_records = []  # Shots classified as weak
     shuttle_records = []  # Shuttle position tracking
-    shot_sequence = []  # Sequence of shots for pattern analysis
-    transition_matrix = defaultdict(lambda: defaultdict(int))  # Shot transition counts
+    shot_sequence = []  # Sequence of shots inside the current rally only
+    rally_sequences = defaultdict(list)  # Rally-wise shot patterns: {rally_id: [shot1, shot2, ...]}
+    transition_matrix = defaultdict(lambda: defaultdict(int))  # Shot transition counts inside rallies only
 
     # Shot detection variables
     last_shot = None
@@ -1103,7 +1307,8 @@ async def analyze(video: UploadFile = File(...)):
     pending_hit_attempts = []  # Track potential weak shot attempts
     last_hit_attempt_frame = -999
     hit_attempt_cooldown = int(fps * 2.5)  # Minimum time between hit attempts
-    weak_evaluation_frames = int(fps * 2.5)  # Frames to wait before deciding if shot is weak
+    weak_evaluation_frames = int(fps * 0.9)   # ~27 frames at 30fps, was 75
+    MAX_ATTEMPT_AGE_FRAMES = int(fps * 2.0)   # discard stale attempts
 
     # Rally tracking - groups consecutive shots between long pauses
     current_rally_id = 1
@@ -1166,8 +1371,7 @@ async def analyze(video: UploadFile = File(...)):
                     tracker_detections.append(([x1, y1, x2 - x1, y2 - y1], conf, cls_id))
 
         candidates = [d for d in all_detections if is_shot_class(d["class_name"])]
-        selected = select_other_side_player(candidates, height)
-
+        selected = select_other_side_player(candidates, height, court_points=court_points)
         current_shot = "Unknown"
         current_conf = 0
         player_box = None
@@ -1181,14 +1385,15 @@ async def analyze(video: UploadFile = File(...)):
         # Use the most common shot type in recent frames (vote-based approach)
         shot_class_history.append(current_shot)
 
-        if len(shot_class_history) >= 4:
+        if len(shot_class_history) >= 3:
             shot_counter = Counter(shot_class_history)
 
             stable_shot = shot_counter.most_common(1)[0][0]
-            stable_count = shot_counter[stable_shot]  # How many times this shot appeared
+            stable_count = shot_counter[stable_shot]
 
-            # Only accept shot if it appeared at least 4 times in last 7 frames
-            if stable_count >= 3:
+            min_votes = 1 if stable_shot in ("Service", "BackHand") else 2
+
+            if stable_count >= min_votes:
                 current_shot = stable_shot
             else:
                 current_shot = "Unknown"
@@ -1241,7 +1446,11 @@ async def analyze(video: UploadFile = File(...)):
         net_y = get_net_y(court_points)
         # Detect if shuttle is falling/dropping
         drop_event = is_shuttle_drop_event(shuttle_history)
-
+        
+        
+        # We're tracking the top player (top side of court)
+        focused_player_side = "top"
+      
         RALLY_GAP_SECONDS = 2.0
         RALLY_GAP_FRAMES = int(fps * RALLY_GAP_SECONDS)
         # Rally finished when shuttle lands
@@ -1253,16 +1462,19 @@ async def analyze(video: UploadFile = File(...)):
         weak_attempt = None  # The attempt that resulted in a weak shot
         reason = "Normal"  # Reason for weak shot classification
 
-        # We're tracking the top player (top side of court)
-        focused_player_side = "top"
-
+        WEAK_SHOT_EXCLUDED_TYPES = ["Service", "ReadyPosition"]
         # Register a potential weak shot attempt
         # This starts tracking when a player hits the shuttle near the net
         if (
-            not pending_hit_attempts  # Only one attempt at a time
-            and hit_attempt_event(current_shot, sx, sy, player_box)  # Player hitting near shuttle
-            and shuttle_side in [focused_player_side, "net_area"]  # Shuttle on player's side or at net
-            and frame_no - last_hit_attempt_frame > hit_attempt_cooldown  # Avoid registering too frequently
+            not pending_hit_attempts
+            and hit_attempt_event(current_shot, sx, sy, player_box)
+            and current_shot not in WEAK_SHOT_EXCLUDED_TYPES
+            and (
+                shuttle_side == focused_player_side
+                or (shuttle_side == "net_area" and shuttle_near_net(sy, court_points, margin=60))
+            )
+            and net_y is not None
+            and frame_no - last_hit_attempt_frame > hit_attempt_cooldown
         ):
             pending_hit_attempts.append({
                 "frame": frame_no,
@@ -1272,29 +1484,28 @@ async def analyze(video: UploadFile = File(...)):
                 "player_track_id": target_track_id,
                 "hitter_side": focused_player_side,
                 "opponent_side": opposite_court_side(focused_player_side),
-                "start_x": sx,  # Shuttle position when hit
+                "start_x": sx,
                 "start_y": sy,
-                "crossed_net": False,  # Will be set to True if shuttle crosses net
+                "crossed_net": False,
             })
             last_hit_attempt_frame = frame_no
-
 
         # Evaluate pending weak shot attempts to determine if they were actually weak shots
         remaining_attempts = []
 
         for attempt in pending_hit_attempts:
-            age = frame_no - attempt["frame"]  # Frames since hit attempt
+            age = frame_no - attempt["frame"]
 
-            # Track if shuttle successfully crossed the net
+            # Discard stale attempts unconditionally
+            if age > MAX_ATTEMPT_AGE_FRAMES:
+                continue  # drop it, don't append to remaining
+            
             if shuttle_side == attempt["opponent_side"]:
                 attempt["crossed_net"] = True
 
-            # If shuttle crossed the net, it's not a weak shot - dismiss this attempt
             if attempt["crossed_net"]:
-                continue
+                continue  # good shot, discard
 
-            # Wait a few frames before making weak shot decision
-            # This gives shuttle time to travel after being hit
             if age < weak_evaluation_frames:
                 remaining_attempts.append(attempt)
                 continue
@@ -1424,6 +1635,7 @@ async def analyze(video: UploadFile = File(...)):
             sy=sy,
             player_box=player_box,
             shuttle_history=shuttle_history,
+            shot_conf=current_conf,
         )
 
         # If a shot happens, the rally is still active
@@ -1432,10 +1644,17 @@ async def analyze(video: UploadFile = File(...)):
 
         # Record the shot if conditions are met
         if (
-            shot_detected
-            and current_shot != "Unknown"
-            and frame_no - last_shot_frame > shot_cooldown  # Avoid duplicate detections
-        ):
+    shot_detected
+    and current_shot != "Unknown"
+    and (
+        frame_no - last_shot_frame > shot_cooldown
+        or current_shot != last_shot
+    )
+):
+             # ← ADD THIS at the top of this block
+            if current_shot == "Service":
+                pending_hit_attempts.clear()
+                last_hit_attempt_frame = -999
             # Check if enough time has passed since the last shot for a new rally
             # REPLACE WITH:
             if shot_records:
@@ -1454,6 +1673,7 @@ async def analyze(video: UploadFile = File(...)):
                     current_rally_id += 1
                     pending_hit_attempts.clear()
                     shot_class_history.clear()   # ← prevent bleed
+                    shot_sequence = []           # reset current-rally sequence
                     last_shot = None
                     last_shot_frame = -999
                     print(f"🏸 Rally ended (gap={gap_seconds:.1f}s, landed={shuttle_landed}). New Rally {current_rally_id}")
@@ -1482,10 +1702,17 @@ async def analyze(video: UploadFile = File(...)):
 
             shot_records.append(shot_data)
 
-            if shot_sequence:
-                transition_matrix[shot_sequence[-1]][current_shot] += 1
+            # Save shot pattern rally-by-rally
+            normalized_current_shot = normalize_shot_name(current_shot)
+            rally_sequences[rally_id].append(normalized_current_shot)
+            shot_sequence.append(normalized_current_shot)
 
-            shot_sequence.append(current_shot)
+            # Calculate transition only inside the same rally
+            # Example: ForeHand → NetShot, NetShot → Lift
+            if len(rally_sequences[rally_id]) >= 2:
+                previous_shot = rally_sequences[rally_id][-2]
+                transition_matrix[previous_shot][normalized_current_shot] += 1
+
             last_shot = current_shot
             last_shot_frame = frame_no
         # ====================================================
@@ -1518,7 +1745,7 @@ async def analyze(video: UploadFile = File(...)):
 
             weak_shot_records.append(weak_data)
 
-            frame_records.append(
+        frame_records.append(
                 {
                     "frame": frame_no,
                     "time_sec": round(timestamp, 3),
@@ -1534,7 +1761,7 @@ async def analyze(video: UploadFile = File(...)):
                 }
             )
 
-            shuttle_records.append(
+        shuttle_records.append(
                 {
                     "frame": frame_no,
                     "time_sec": round(timestamp, 3),
@@ -1544,7 +1771,7 @@ async def analyze(video: UploadFile = File(...)):
                     "net_y": round(net_y, 2) if net_y is not None else None,
                     "shuttle_side": shuttle_side,
                 }
-            )
+            )    
 
     cap.release()
 
@@ -1596,7 +1823,10 @@ async def analyze(video: UploadFile = File(...)):
         weak_shot_records=weak_shot_records,
         shuttle_records=shuttle_records,
         transition_matrix=transition_matrix,
+        rally_sequences=rally_sequences,
         output_paths=output_paths,
+        match_id=match_id,
+        player_id=player_name,
     )
 
     return JSONResponse(
@@ -1616,6 +1846,8 @@ async def analyze(video: UploadFile = File(...)):
             "transition_json": f"/outputs/{job_id}_tactical_transition_matrix.json",
 
             "transition_matrix": {k: dict(v) for k, v in transition_matrix.items()},
+            "rally_patterns": tactical_summary["main_output_preview"].get("rally_patterns", []),
+            "pattern_scores": tactical_summary["main_output_preview"].get("pattern_scores", []),
             "normal_total_shots": tactical_summary["normal_total_shots"],
             "weak_total_shots": tactical_summary["weak_total_shots"],
             "total_including_weak": tactical_summary["total_including_weak"],
@@ -1626,7 +1858,89 @@ async def analyze(video: UploadFile = File(...)):
     )
 
 
+@app.post("/reanalyze")
+async def reanalyze(job_id: str):
+    """
+    Re-runs only the output builder using previously saved JSON files.
+    Skips TrackNet and YOLO entirely. Use this to tweak output logic
+    without reprocessing the video.
+    """
+    # Load previously saved shot and weak shot records
+    main_json_path = OUTPUTS_DIR / f"{job_id}_main_tactical_output.json"
+    m2_json_path   = OUTPUTS_DIR / f"{job_id}_m2.json"
 
+    if not m2_json_path.exists():
+        return JSONResponse(
+            {"error": f"No previous analysis found for job_id '{job_id}'. Run /analyze first."},
+            status_code=404,
+        )
+
+    with open(m2_json_path, "r") as f:
+        m2 = json.load(f)
+
+    shot_records      = m2.get("normal_shots", [])
+    weak_shot_records = m2.get("weak_shots", [])
+
+    # Rebuild rally-wise sequences and transition matrix from shot records.
+    # This prevents the last shot of one rally from connecting to the first shot of the next rally.
+    rally_sequences = defaultdict(list)
+
+    for shot in shot_records:
+        rally_id = int(shot.get("rally_id", 1))
+        shot_type = normalize_shot_name(shot.get("shot_type", "Unknown"))
+        if shot_type != "Unknown":
+            rally_sequences[rally_id].append(shot_type)
+
+    transition_matrix = defaultdict(lambda: defaultdict(int))
+
+    for rally_id, sequence in rally_sequences.items():
+        for i in range(len(sequence) - 1):
+            from_shot = sequence[i]
+            to_shot = sequence[i + 1]
+            transition_matrix[from_shot][to_shot] += 1
+
+    # Load shuttle records if available
+    shuttle_json_path = OUTPUTS_DIR / f"{job_id}_shuttle_trajectory_final.json"
+    shuttle_records = []
+    if shuttle_json_path.exists():
+        with open(shuttle_json_path, "r") as f:
+            shuttle_records = json.load(f)
+
+    output_paths = {
+        "m2_json":        OUTPUTS_DIR / f"{job_id}_m2.json",
+        "main_json":      OUTPUTS_DIR / f"{job_id}_main_tactical_output.json",
+        "frame_json":     OUTPUTS_DIR / f"{job_id}_frame_level_output.json",
+        "shot_json":      OUTPUTS_DIR / f"{job_id}_shot_level_output.json",
+        "weak_shot_json": OUTPUTS_DIR / f"{job_id}_weak_shots.json",
+        "shuttle_json":   OUTPUTS_DIR / f"{job_id}_shuttle_trajectory_final.json",
+        "transition_json":OUTPUTS_DIR / f"{job_id}_tactical_transition_matrix.json",
+    }
+
+    tactical_summary = build_tactical_outputs(
+        job_id=job_id,
+        frame_records=[],           # not needed for output builder
+        shot_records=shot_records,
+        weak_shot_records=weak_shot_records,
+        shuttle_records=shuttle_records,
+        transition_matrix=transition_matrix,
+        rally_sequences=rally_sequences,
+        output_paths=output_paths,
+    )
+
+    return JSONResponse({
+        "job_id": job_id,
+        "message": "Re-analysis completed using saved data.",
+        "normal_total_shots":   tactical_summary["normal_total_shots"],
+        "weak_total_shots":     tactical_summary["weak_total_shots"],
+        "total_including_weak": tactical_summary["total_including_weak"],
+        "shot_distribution":    tactical_summary["shot_distribution"],
+        "main_json":      f"/outputs/{job_id}_main_tactical_output.json",
+        "shot_json":      f"/outputs/{job_id}_shot_level_output.json",
+        "weak_shot_json": f"/outputs/{job_id}_weak_shots.json",
+        "transition_json":f"/outputs/{job_id}_tactical_transition_matrix.json",
+        "rally_patterns": tactical_summary["main_output_preview"].get("rally_patterns", []),
+        "pattern_scores": tactical_summary["main_output_preview"].get("pattern_scores", []),
+    })
 
 if __name__ == "__main__":
     import uvicorn

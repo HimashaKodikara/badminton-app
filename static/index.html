@@ -228,6 +228,8 @@
   .badge-lift     { background: var(--accent-bg); color: var(--accent); }
   .badge-netshot  { background: var(--amber-bg); color: var(--amber); }
   .badge-service  { background: #fef0f6; color: #a0336b; }
+  .badge-dropshot { background: var(--orange-bg); color: var(--orange); }
+  .badge-clear    { background: var(--blue-bg); color: var(--blue); }
   .badge-ready    { background: var(--surface-2); color: var(--text-muted); }
   .badge-weak     { background: var(--red-bg); color: var(--red); }
   .badge-ok       { background: var(--accent-bg); color: var(--accent); }
@@ -297,7 +299,12 @@
 </div>
 
 <div class="container">
-
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px;">
+  <input id="matchIdInput" type="text" placeholder="Match ID e.g. match_001"
+         style="padding:12px;border:1px solid var(--border);border-radius:10px;">
+  <input id="playerNameInput" type="text" placeholder="Player name e.g. John Doe"
+         style="padding:12px;border:1px solid var(--border);border-radius:10px;">
+</div>
   <!-- Upload -->
   <div class="upload-section">
     <div class="upload-card" id="dropzone"
@@ -313,6 +320,12 @@
     <div id="filename-label"></div>
     <button class="btn-analyze" id="analyzeBtn" onclick="analyze()" disabled>
       <i class="ti ti-player-play" aria-hidden="true"></i> Analyze Video
+    </button>
+
+   
+
+    <button class="btn-analyze" id="loadPreviousBtn" style="background:#1a5fa0;margin-top:10px" onclick="loadPreviousResult()">
+      <i class="ti ti-history" aria-hidden="true"></i> Load Previous Result
     </button>
   </div>
 
@@ -333,26 +346,26 @@
   <div id="dashboard">
 
     <div class="section-label">Summary</div>
-    <div class="metrics-grid" id="metricsGrid"></div>'
+    <div class="metrics-grid" id="metricsGrid"></div>
+
+   
     
     <div class="section-label">Output video</div>
     <div class="video-card">
       <div class="video-card-header"><h3>Annotated output</h3></div>
-      <video id="outputVideo" controls></video>
+      <video id="outputVideo" controls playsinline preload="auto"></video>
     </div>
 
     <div class="section-label">Downloads</div>
     <div class="downloads-row">
-      <a class="dl-btn" id="dlShot" href="#" download><i class="ti ti-table-export"></i> Shot CSV</a>
-      <a class="dl-btn" id="dlFrame" href="#" download><i class="ti ti-table-export"></i> Frame CSV</a>
-      <a class="dl-btn" id="dlShuttleCsv" href="#" download><i class="ti ti-table-export"></i> Shuttle CSV</a>
-      <a class="dl-btn" id="dlTransitionCsv" href="#" download><i class="ti ti-table-export"></i> Transition CSV</a>
+      <!-- CSV downloads removed: only JSON outputs are exposed -->
       <a class="dl-btn" id="dlM2Json" href="#" download><i class="ti ti-file-code"></i> M2 JSON</a>
       <a class="dl-btn" id="dlMainJson" href="#" download><i class="ti ti-file-code"></i> Main Tactical JSON</a>
       <a class="dl-btn" id="dlFrameJson" href="#" download><i class="ti ti-file-code"></i> Frame JSON</a>
       <a class="dl-btn" id="dlShotJson" href="#" download><i class="ti ti-file-code"></i> Shot JSON</a>
       <a class="dl-btn" id="dlShuttleJson" href="#" download><i class="ti ti-file-code"></i> Shuttle JSON</a>
       <a class="dl-btn" id="dlTransitionJson" href="#" download><i class="ti ti-file-code"></i> Transition JSON</a>
+      <a class="dl-btn" id="dlAnalysisJson" href="#" download><i class="ti ti-file-code"></i> Analysis JSON</a>
     </div>
 
     <div class="section-label">Shot distribution &amp; weak shots</div>
@@ -384,7 +397,7 @@
           <thead>
             <tr>
               <th>#</th><th>Time</th><th>Shot type</th><th>Confidence</th>
-              <th>Shuttle</th><th>Inside court</th><th>Weak shot</th>
+              <th>Shuttle</th><th>Inside court</th><th>Weak shot</th><th>Weak reason</th>
             </tr>
           </thead>
           <tbody id="shotTableBody"></tbody>
@@ -400,7 +413,45 @@
       </div>
     </div>
 
-    
+    <div class="section-label">Rally shot patterns</div>
+    <div class="table-card">
+      <div class="table-card-header">
+        <h3>Rally-by-rally shot pattern</h3>
+        <span id="rallyPatternCountLabel" style="font-size:12px;color:var(--text-muted);"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Rally</th>
+              <th>Pattern</th>
+              <th>Length</th>
+            </tr>
+          </thead>
+          <tbody id="rallyPatternBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section-label">Pattern scores</div>
+    <div class="table-card">
+      <div class="table-card-header">
+        <h3>Repeated tactical patterns</h3>
+        <span id="patternScoreCountLabel" style="font-size:12px;color:var(--text-muted);"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Pattern</th>
+              <th>Count</th>
+              <th>Score</th>
+            </tr>
+          </thead>
+          <tbody id="patternScoreBody"></tbody>
+        </table>
+      </div>
+    </div>
 
   </div>
 </div>
@@ -421,6 +472,8 @@ const SHOT_COLORS = {
   NetShot:       '#a06000',
   Service:       '#a0336b',
   ReadyPosition: '#aaa9a3',
+  DropShot:      '#c4521a',
+  Clear:         '#1a5fa0',
 };
 
 function shotColor(name) { return SHOT_COLORS[name] || '#aaa9a3'; }
@@ -428,7 +481,8 @@ function shotColor(name) { return SHOT_COLORS[name] || '#aaa9a3'; }
 function shotBadge(name) {
   const map = {
     Smash:'smash', ForeHand:'forehand', BackHand:'backhand',
-    Lift:'lift', NetShot:'netshot', Service:'service', ReadyPosition:'ready'
+    Lift:'lift', NetShot:'netshot', Service:'service', ReadyPosition:'ready',
+    DropShot:'dropshot', Clear:'clear'
   };
   const cls = map[name] || 'ready';
   return `<span class="badge badge-${cls}">${name}</span>`;
@@ -458,6 +512,60 @@ function setProgress(msg) {
 // ── Safe getElementById wrapper ──────────────────────────────────
 function el(id) { return document.getElementById(id); }
 
+function normalizeResultData(data) {
+  data = data || {};
+
+  // Support backend responses that wrap notebook output inside main_output_preview.
+  if (data.main_output_preview) {
+    const preview = data.main_output_preview;
+    data.shots = data.shots || preview.shots || [];
+    data.rallies = data.rallies || preview.rallies || [];
+    data.transition_matrix = data.transition_matrix || preview.transition_matrix || {};
+    data.rally_patterns = data.rally_patterns || preview.rally_patterns || [];
+    data.pattern_scores = data.pattern_scores || preview.pattern_scores || [];
+
+    if (!data.shot_distribution && preview.current_video_profile) {
+      data.shot_distribution =
+        preview.current_video_profile.shot_distribution_percentage_raw_classes ||
+        preview.current_video_profile.shot_distribution ||
+        {};
+    }
+  }
+
+  data.shots = data.shots || [];
+  data.rallies = data.rallies || [];
+  data.total_shots = data.total_shots || data.shots.length || 0;
+  data.shot_distribution = data.shot_distribution || {};
+  data.transition_matrix = data.transition_matrix || {};
+  data.rally_patterns = data.rally_patterns || [];
+  data.pattern_scores = data.pattern_scores || [];
+
+  // Optional file names from the notebook/final pipeline.
+  const jobId = data.job_id || '';
+  if (jobId) {
+    // Provide a default analysis JSON path; CSV defaults removed
+    data.analysis_json = data.analysis_json || data.badminton_analysis_json || `/outputs/${jobId}_badminton_analysis.json`;
+  }
+
+  return data;
+}
+
+function getShotNumber(s, index) {
+  return s.shot_number || s.shot_id || index + 1;
+}
+
+function getWeakFlag(s) {
+  if (s.weak_shot_binary === 1 || s.weak_shot_binary === true) return true;
+  if (s.weak_shot && s.weak_shot.is_weak === true) return true;
+  return false;
+}
+
+function getWeakReasonText(s) {
+  if (s.weak_shot_reason) return s.weak_shot_reason;
+  if (s.weak_shot && s.weak_shot.reason) return s.weak_shot.reason;
+  return '-';
+}
+
 async function analyze() {
   if (!selectedFile) return;
   const btn = el('analyzeBtn');
@@ -470,12 +578,22 @@ async function analyze() {
   setProgress('Uploading video...');
 
   const fd = new FormData();
-  fd.append('video', selectedFile);
+ 
+  
 
-  try {
+  fd.append('video', selectedFile);
+  fd.append('match_id', document.getElementById('matchIdInput').value || 'match_001');
+  fd.append('player_name', document.getElementById('playerNameInput').value || 'player_01');
+
+ try {
     setProgress('Running TrackNetV3 shuttle tracking (this takes a few minutes)...');
-    const res  = await fetch('/analyze', { method: 'POST', body: fd });
-    const data = await res.json();
+
+    const res = await fetch('/analyze', {
+        method: 'POST',
+        body: fd
+    });
+    let data = await res.json();
+    data = normalizeResultData(data);
     el('progressWrap').classList.remove('active');
 
     if (!res.ok || data.error) {
@@ -492,11 +610,14 @@ async function analyze() {
     renderDashboard(data);
 
     const videoEl = el('outputVideo');
-      if (videoEl && d.video) {
-        videoEl.src = d.video + '?t=' + Date.now();
-        videoEl.type = 'video/mp4';
-        videoEl.load();
-}
+    if (videoEl && data.video) {
+      videoEl.src = data.video + '?t=' + Date.now();
+      videoEl.load();
+    }
+
+    if (data.job_id) {
+      localStorage.setItem('last_badminton_job_id', data.job_id);
+    }
   } catch (e) {
     el('progressWrap').classList.remove('active');
     const eb = el('errorBox');
@@ -558,10 +679,23 @@ function renderDashboard(d) {
   dashboard.style.display = 'block';
   dashboard.classList.add('visible');
 
-  const weakShots    = shots.filter(s => s.weak_shot_binary === 1).length;
+  const weakShots    = shots.filter(getWeakFlag).length;
   const insideCount  = shots.filter(s => s.inside_court === true).length;
   const outsideCount = shots.filter(s => s.inside_court === false).length;
   const topShot      = Object.entries(dist).sort((a,b) => b[1] - a[1])[0];
+
+  const totalRallies = d.rallies.length;
+  const rallyLengths = d.rallies.map(r => Number(r.length || r.shot_count || 0));
+  const longestRally = rallyLengths.length ? Math.max(...rallyLengths) : 0;
+  const avgRally = rallyLengths.length
+    ? (rallyLengths.reduce((a, b) => a + b, 0) / rallyLengths.length).toFixed(1)
+    : '0';
+  const rallyWeakTotal = d.rallies.reduce((sum, r) => sum + Number(r.weak_shots_count || 0), 0);
+
+  if (el('totalRallies')) el('totalRallies').textContent = totalRallies;
+  if (el('longestRally')) el('longestRally').textContent = longestRally;
+  if (el('avgRallyLength')) el('avgRallyLength').textContent = avgRally;
+  if (el('rallyWeakShots')) el('rallyWeakShots').textContent = rallyWeakTotal;
 
   // ── Metrics ──────────────────────────────────────────────────────
   const metricsGrid = el('metricsGrid');
@@ -586,7 +720,7 @@ function renderDashboard(d) {
       </div>
       <div class="metric-card">
         <div class="lbl">Most used</div>
-        <div class="val purple">${topShot ? topShot[1] + '%' : '—'}</div>
+        <div class="val purple">${topShot ? Number(topShot[1]).toFixed(1) + '%' : '—'}</div>
         <div class="sub">${topShot ? topShot[0] : ''}</div>
       </div>
       <div class="metric-card">
@@ -629,7 +763,7 @@ function renderDashboard(d) {
   const weakByType = {}, totalByType = {};
   shots.forEach(s => {
     totalByType[s.shot_type] = (totalByType[s.shot_type] || 0) + 1;
-    if (s.weak_shot_binary === 1) weakByType[s.shot_type] = (weakByType[s.shot_type] || 0) + 1;
+    if (getWeakFlag(s)) weakByType[s.shot_type] = (weakByType[s.shot_type] || 0) + 1;
   });
   const weakLabels = Object.keys(totalByType);
   const weakVals   = weakLabels.map(k => weakByType[k] || 0);
@@ -724,42 +858,151 @@ function renderDashboard(d) {
   if (shotTableBody) {
     shotTableBody.innerHTML = shots.map(s => `
       <tr>
-        <td style="color:var(--text-muted);font-family:'DM Mono',monospace">${s.shot_number}</td>
+        <td style="color:var(--text-muted);font-family:'DM Mono',monospace">${getShotNumber(s, shots.indexOf(s))}</td>
         <td style="font-family:'DM Mono',monospace;color:var(--text-secondary)">${s.time_sec}s</td>
         <td>${shotBadge(s.shot_type)}</td>
         <td style="font-family:'DM Mono',monospace">${s.confidence !== undefined ? Math.round(s.confidence * 100) + '%' : '—'}</td>
         <td style="color:var(--text-muted);font-size:12px;font-family:'DM Mono',monospace">${s.shuttle_x != null ? s.shuttle_x + ', ' + s.shuttle_y : '—'}</td>
         <td>${s.inside_court === true ? '<span style="color:var(--accent);font-weight:500">Yes</span>' : s.inside_court === false ? '<span style="color:var(--red)">No</span>' : '<span style="color:var(--text-muted)">—</span>'}</td>
-        <td>${s.weak_shot_binary === 1
+        <td>${getWeakFlag(s)
           ? '<span class="badge badge-weak">Weak</span>'
           : '<span class="badge badge-ok">No</span>'}</td>
+        <td style="max-width:260px;white-space:normal;">${getWeakFlag(s) ? getWeakReasonText(s) : '-'}</td>
       </tr>
     `).join('');
   }
 
-  // ── Video ─────────────────────────────────────────────────────────
+  // ── Video ───────────────────────
   const outputVideo = el('outputVideo');
-  if (outputVideo) outputVideo.src = d.video;
 
-  video.src = safeVideoPath;
-  video.load();
+  if (outputVideo && d.video) {
+      outputVideo.src = d.video + '?t=' + Date.now();
+      outputVideo.load();
+
+      outputVideo.onloadeddata = () => {
+          console.log("Video loaded");
+      };
+
+      outputVideo.onerror = () => {
+          console.log("Video failed");
+      };
+  }
+
+  // ── Rally-by-rally shot patterns ─────────────────────────────────
+  const rallyPatterns = d.rally_patterns || [];
+
+  const rallyPatternCountLabel = el('rallyPatternCountLabel');
+  if (rallyPatternCountLabel) {
+    rallyPatternCountLabel.textContent = `${rallyPatterns.length} rallies`;
+  }
+
+  const rallyPatternBody = el('rallyPatternBody');
+  if (rallyPatternBody) {
+    rallyPatternBody.innerHTML = rallyPatterns.length
+      ? rallyPatterns.map(r => `
+        <tr>
+          <td style="font-family:'DM Mono',monospace;color:var(--text-muted)">${r.rally_id}</td>
+          <td style="color:var(--text-secondary);white-space:normal;min-width:420px;">${r.pattern_string || '-'}</td>
+          <td style="font-family:'DM Mono',monospace">${r.pattern_length || 0}</td>
+        </tr>
+      `).join('')
+      : `<tr><td colspan="3" style="color:var(--text-muted);">No rally patterns found.</td></tr>`;
+  }
+
+  // ── Pattern scores ───────────────────────────────────────────────
+  const patternScores = d.pattern_scores || [];
+
+  const patternScoreCountLabel = el('patternScoreCountLabel');
+  if (patternScoreCountLabel) {
+    patternScoreCountLabel.textContent = `${patternScores.length} repeated patterns`;
+  }
+
+  const patternScoreBody = el('patternScoreBody');
+  if (patternScoreBody) {
+    patternScoreBody.innerHTML = patternScores.length
+      ? patternScores.map(p => `
+        <tr>
+          <td style="color:var(--text-secondary);white-space:normal;min-width:420px;">${p.pattern}</td>
+          <td style="font-family:'DM Mono',monospace">${p.count}</td>
+          <td style="font-family:'DM Mono',monospace;color:var(--accent);font-weight:600">${p.score}</td>
+        </tr>
+      `).join('')
+      : `<tr><td colspan="3" style="color:var(--text-muted);">No repeated patterns found.</td></tr>`;
+  }
 
   // ── Transition matrix ─────────────────────────────────────────────
   renderTransitionMatrix(d.transition_matrix || {});
-  // ── Downloads ─────────────────────────────────────────────────────
-  setDownload('dlShot', d.shot_csv);
-  setDownload('dlFrame', d.frame_csv);
-  setDownload('dlShuttleCsv', d.shuttle_analysis_csv || d.tracknet_shuttle_csv);
-  setDownload('dlTransitionCsv', d.transition_csv);
+  // ── Downloads (JSON only) ─────────────────────────────────────────
   setDownload('dlM2Json', d.m2_json);
   setDownload('dlMainJson', d.main_json);
   setDownload('dlFrameJson', d.frame_json);
   setDownload('dlShotJson', d.shot_json);
   setDownload('dlShuttleJson', d.shuttle_json);
   setDownload('dlTransitionJson', d.transition_json);
+  setDownload('dlAnalysisJson', d.analysis_json);
 
   el('analyzeBtn').disabled = false;
 }
+
+async function loadPreviousResult() {
+  const savedJobId = localStorage.getItem('last_badminton_job_id') || '';
+  const jobId = prompt('Enter Job ID', savedJobId);
+
+  if (!jobId) return;
+
+  const cleanJobId = jobId.trim();
+
+  try {
+    el('errorBox').style.display = 'none';
+    el('progressWrap').classList.add('active');
+    setProgress('Loading previous analysis result...');
+
+    const res = await fetch(`/outputs/${cleanJobId}_main_tactical_output.json?t=${Date.now()}`);
+
+    if (!res.ok) {
+      throw new Error('Previous result JSON not found');
+    }
+
+    const data = await res.json();
+
+    data.job_id = data.job_id || cleanJobId;
+    data.video = `/outputs/${cleanJobId}_output_browser.mp4`;
+    // Only JSON outputs
+    data.m2_json = `/outputs/${cleanJobId}_m2.json`;
+    data.main_json = `/outputs/${cleanJobId}_main_tactical_output.json`;
+    data.frame_json = `/outputs/${cleanJobId}_frame_level_output.json`;
+    data.shot_json = `/outputs/${cleanJobId}_shot_level_output.json`;
+    data.shuttle_json = `/outputs/${cleanJobId}_shuttle_trajectory_final.json`;
+    data.transition_json = `/outputs/${cleanJobId}_tactical_transition_matrix.json`;
+    data.analysis_json = `/outputs/${cleanJobId}_badminton_analysis.json`;
+
+    data = normalizeResultData(data);
+
+    if (!data.shot_distribution && data.current_video_profile) {
+      data.shot_distribution = data.current_video_profile.shot_distribution_percentage_raw_classes || {};
+    }
+
+    localStorage.setItem('last_badminton_job_id', cleanJobId);
+
+    el('progressWrap').classList.remove('active');
+    renderDashboard(data);
+  } catch (e) {
+    el('progressWrap').classList.remove('active');
+    const eb = el('errorBox');
+    eb.style.display = 'block';
+    eb.innerHTML = '<strong>Previous result not found.</strong><br>Check the Job ID and make sure the output files exist in the outputs folder.';
+  }
+}
+
+window.addEventListener('load', () => {
+  const savedJobId = localStorage.getItem('last_badminton_job_id');
+  const label = el('filename-label');
+
+  if (savedJobId && label) {
+    label.textContent = `Last result Job ID: ${savedJobId}`;
+  }
+});
+
 </script>
 </body>
 </html>

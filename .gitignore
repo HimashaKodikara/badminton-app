@@ -18,3 +18,6 @@ models/
 
 # TrackNet generated predictions
 TrackNetV3/prediction_*/
+
+# Separate local repository; do not include in this repository
+TrackNetV3/
